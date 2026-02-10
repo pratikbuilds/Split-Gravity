@@ -53,10 +53,11 @@ const DEATH_MARGIN_FRACTION = 1.0; // 1.0 = full character height below surface
 const FLIP_ARC_FORWARD = 80; // horizontal boost (px) during flip arc
 const FLIP_ARC_DECAY = 0.96; // per-frame decay of flip velocity
 // Flip this to true when you want collider/probe debug visuals in the UI.
-const ENABLE_COLLIDER_DEBUG_UI = false;
+const ENABLE_COLLIDER_DEBUG_UI = true;
 const COYOTE_TIME_MS = 140; // allow jump shortly after leaving an edge
 const EDGE_CONTACT_MARGIN = 4; // shrink feet bounds to avoid 1px cling
-const EDGE_MIN_OVERLAP = 6; // minimum horizontal overlap to count as support
+const SUPPORT_MIN_OVERLAP = 6; // minimum overlap required to stay supported
+const LANDING_MIN_OVERLAP = 2; // more forgiving overlap for snap-to-landing checks
 const BACKGROUND_TILE_SCALE = 5;
 const BACKGROUND_SCROLL_FACTOR = 0.2;
 
@@ -122,7 +123,22 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
 
   // Update platform rects for worklet when platforms change
   useEffect(() => {
-    const rects = platforms.flatMap((p) => [p.x, p.y, p.width, p.height]);
+    const rects: number[] = [];
+    for (const p of platforms) {
+      const cols = Math.ceil(p.width / tileSize);
+      const rows = Math.ceil(p.height / tileSize);
+      for (let row = 0; row < rows; row++) {
+        const remainingHeight = p.height - row * tileSize;
+        const drawHeight = Math.min(tileSize, remainingHeight);
+        if (drawHeight <= 0) continue;
+        for (let col = 0; col < cols; col++) {
+          const remainingWidth = p.width - col * tileSize;
+          const drawWidth = Math.min(tileSize, remainingWidth);
+          if (drawWidth <= 0) continue;
+          rects.push(p.x + col * tileSize, p.y + row * tileSize, drawWidth, drawHeight);
+        }
+      }
+    }
     platformRects.value = rects;
   }, [platforms]);
 
@@ -177,6 +193,8 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
     const charW = CHAR_SIZE * CHAR_SCALE;
     const gDir = gravityDirection.value;
     const isDying = dying.value === 1;
+    const prevTop = posY.value;
+    const prevBottom = prevTop + charH;
     simTimeMs.value += dt;
 
     if (dying.value === 0) {
@@ -203,11 +221,13 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
       const pw = rects[i + 2];
       const ph = rects[i + 3];
       const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
-      if (overlap < EDGE_MIN_OVERLAP) continue;
+      if (overlap < LANDING_MIN_OVERLAP) continue;
 
       // Ignore top lane surface for downward land/death checks.
       if (py >= groundHeight) {
-        if (py < nearestDownSurface && charBottom >= py && charTop <= py) {
+        const crossedDown = prevBottom <= py + GROUNDED_EPSILON && charBottom >= py;
+        const alreadyOnSurface = Math.abs(prevBottom - py) <= GROUNDED_EPSILON;
+        if (py < nearestDownSurface && (crossedDown || alreadyOnSurface)) {
           nearestDownSurface = py;
         }
         if (py > farthestDownSurface) {
@@ -216,38 +236,13 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
       }
 
       const bottomSurface = py + ph;
+      const crossedUp = prevTop >= bottomSurface - GROUNDED_EPSILON && charTop <= bottomSurface;
+      const alreadyOnCeiling = Math.abs(prevTop - bottomSurface) <= GROUNDED_EPSILON;
       if (
         bottomSurface > nearestUpSurface &&
-        charTop <= bottomSurface &&
-        charBottom >= bottomSurface
+        (crossedUp || alreadyOnCeiling)
       ) {
         nearestUpSurface = bottomSurface;
-      }
-    }
-
-    if (!inFlatZone && !isDying) {
-      if (gDir === 1) {
-        const floorY = farthestDownSurface > Number.NEGATIVE_INFINITY ? farthestDownSurface : gY;
-        const deathThreshold = floorY + charH * DEATH_MARGIN_FRACTION;
-        if (charBottom > deathThreshold) {
-          dying.value = 1;
-          deathScore.value = Math.floor(totalScroll.value);
-          velocityX.value = 0;
-        }
-      } else if (charTop < -charH * DEATH_MARGIN_FRACTION) {
-        dying.value = 1;
-        deathScore.value = Math.floor(totalScroll.value);
-        velocityX.value = 0;
-      }
-    }
-
-    if (dying.value === 1) {
-      const offscreenDown = posY.value > height + charH;
-      const offscreenUp = posY.value + charH < -charH;
-      if ((gDir === 1 && offscreenDown) || (gDir === -1 && offscreenUp)) {
-        gameOver.value = 1;
-        scheduleOnRN(triggerGameOver, deathScore.value);
-        return;
       }
     }
 
@@ -282,7 +277,7 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
             const py = rects[i + 1];
             const pw = rects[i + 2];
             const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
-            if (overlap >= EDGE_MIN_OVERLAP && py >= groundHeight) {
+            if (overlap >= SUPPORT_MIN_OVERLAP && py >= groundHeight) {
               if (Math.abs(posY.value - (py - charH)) <= GROUNDED_EPSILON) {
                 onBottom = true;
                 break;
@@ -299,7 +294,7 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
             const pw = rects[i + 2];
             const ph = rects[i + 3];
             const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
-            if (overlap >= EDGE_MIN_OVERLAP) {
+            if (overlap >= SUPPORT_MIN_OVERLAP) {
               if (Math.abs(posY.value - (py + ph)) <= GROUNDED_EPSILON) {
                 onTop = true;
                 break;
@@ -318,8 +313,34 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
         velocityX.value *= FLIP_ARC_DECAY;
         if (velocityX.value < 1) velocityX.value = 0;
       }
+
+      if (!inFlatZone && !grounded) {
+        if (gDir === 1) {
+          const floorY = farthestDownSurface > Number.NEGATIVE_INFINITY ? farthestDownSurface : gY;
+          const deathThreshold = floorY + charH * DEATH_MARGIN_FRACTION;
+          if (posY.value + charH > deathThreshold) {
+            dying.value = 1;
+            deathScore.value = Math.floor(totalScroll.value);
+            velocityX.value = 0;
+          }
+        } else if (posY.value < -charH * DEATH_MARGIN_FRACTION) {
+          dying.value = 1;
+          deathScore.value = Math.floor(totalScroll.value);
+          velocityX.value = 0;
+        }
+      }
     } else {
       velocityX.value = 0;
+    }
+
+    if (dying.value === 1) {
+      const offscreenDown = posY.value > height + charH;
+      const offscreenUp = posY.value + charH < -charH;
+      if ((gDir === 1 && offscreenDown) || (gDir === -1 && offscreenUp)) {
+        gameOver.value = 1;
+        scheduleOnRN(triggerGameOver, deathScore.value);
+        return;
+      }
     }
 
     elapsedMs.value += dt;
@@ -348,7 +369,7 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
         // Only allow flip when grounded (on floor, platform, or ceiling)
         let onBottom = false;
         if (gDir === 1) {
-          onBottom = inFlatZone && posY.value >= gY - charH - GROUNDED_EPSILON;
+          onBottom = inFlatZone && Math.abs(posY.value - (gY - charH)) <= GROUNDED_EPSILON;
           if (!onBottom) {
             const rects = platformRects.value;
             for (let i = 0; i < rects.length; i += 4) {
@@ -356,7 +377,7 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
               const py = rects[i + 1];
               const pw = rects[i + 2];
               const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
-              if (overlap >= EDGE_MIN_OVERLAP && py >= groundHeight) {
+              if (overlap >= SUPPORT_MIN_OVERLAP && py >= groundHeight) {
                 if (Math.abs(posY.value - (py - charH)) <= GROUNDED_EPSILON) {
                   onBottom = true;
                   break;
@@ -367,7 +388,7 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
         }
         let onTop = false;
         if (gDir === -1) {
-          onTop = inFlatZone && posY.value <= groundHeight + GROUNDED_EPSILON;
+          onTop = inFlatZone && Math.abs(posY.value - groundHeight) <= GROUNDED_EPSILON;
           if (!onTop) {
             const rects = platformRects.value;
             for (let i = 0; i < rects.length; i += 4) {
@@ -376,7 +397,7 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
               const pw = rects[i + 2];
               const ph = rects[i + 3];
               const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
-              if (overlap >= EDGE_MIN_OVERLAP) {
+              if (overlap >= SUPPORT_MIN_OVERLAP) {
                 if (Math.abs(posY.value - (py + ph)) <= GROUNDED_EPSILON) {
                   onTop = true;
                   break;
@@ -451,6 +472,8 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
     };
     const GRASS = { left: 6, center: 7, right: 8 };
     const DIRT = { left: 28, center: 29, right: 30 };
+    const CENTER_PLATFORM_TOP = { left: 34, center: 35, right: 36 };
+    const CENTER_PLATFORM_BOTTOM = { left: 34, center: 35, right: 36 };
 
     // When two platforms touch edge-to-edge, render center tiles at the shared seam
     // to avoid a dark "cap-to-cap" breaker line.
@@ -476,17 +499,29 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
           const rows = Math.ceil(p.height / tileSize);
           for (let row = 0; row < rows; row++) {
             const isSurface = p.surface === 'top' ? row === rows - 1 : row === 0;
-            const tiles = isSurface ? GRASS : DIRT;
+            const tiles =
+              p.surface === 'pillar'
+                ? row === 0
+                  ? CENTER_PLATFORM_TOP
+                  : CENTER_PLATFORM_BOTTOM
+                : isSurface
+                  ? GRASS
+                  : DIRT;
             const leftTile = hasLeftNeighbor ? tiles.center : tiles.left;
             const rightTile = hasRightNeighbor ? tiles.center : tiles.right;
             for (let col = 0; col < cols; col++) {
+              const remainingWidth = p.width - col * tileSize;
+              const drawWidth = Math.min(tileSize, remainingWidth);
+              if (drawWidth <= 0) continue;
               const tileIndex =
                 col === 0 ? leftTile : col === cols - 1 ? rightTile : tiles.center;
               const srcRect = getSrcRect(tileIndex);
+              const srcWidth = (drawWidth / tileSize) * TILEMAP_SIZE;
+              const clippedSrcRect = Skia.XYWHRect(srcRect.x, srcRect.y, srcWidth, srcRect.height);
               const x = Math.floor(p.x + col * tileSize);
               const y = Math.floor(p.y + row * tileSize);
-              const dst = Skia.XYWHRect(x, y, tileSize, tileSize);
-              canvas.drawImageRect(tilemapImage, srcRect, dst, paint);
+              const dst = Skia.XYWHRect(x, y, drawWidth, tileSize);
+              canvas.drawImageRect(tilemapImage, clippedSrcRect, dst, paint);
             }
           }
         }
@@ -510,22 +545,30 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
     topStroke.setColor(Skia.Color('#ff4d4f'));
     topStroke.setAntiAlias(false);
 
-    const guide = Skia.Paint();
-    guide.setStyle(1);
-    guide.setStrokeWidth(1);
-    guide.setColor(Skia.Color('#ffffff'));
-    guide.setAntiAlias(false);
-
     const maxX = Math.max(...platforms.map((p) => p.x + p.width), width * 3) + tileSize * 2;
-    const gY = height - groundHeight;
     return createPicture(
       (canvas) => {
         for (const p of platforms) {
-          const r = Skia.XYWHRect(p.x, p.y, p.width, p.height);
-          canvas.drawRect(r, p.surface === 'top' ? topStroke : stroke);
+          const cols = Math.ceil(p.width / tileSize);
+          const rows = Math.ceil(p.height / tileSize);
+          for (let row = 0; row < rows; row++) {
+            const remainingHeight = p.height - row * tileSize;
+            const drawHeight = Math.min(tileSize, remainingHeight);
+            if (drawHeight <= 0) continue;
+            for (let col = 0; col < cols; col++) {
+              const remainingWidth = p.width - col * tileSize;
+              const drawWidth = Math.min(tileSize, remainingWidth);
+              if (drawWidth <= 0) continue;
+              const r = Skia.XYWHRect(
+                p.x + col * tileSize,
+                p.y + row * tileSize,
+                drawWidth,
+                drawHeight
+              );
+              canvas.drawRect(r, p.surface === 'top' ? topStroke : stroke);
+            }
+          }
         }
-        canvas.drawLine(0, gY, maxX, gY, guide);
-        canvas.drawLine(0, groundHeight, maxX, groundHeight, guide);
       },
       Skia.XYWHRect(0, 0, maxX, height)
     );
@@ -575,15 +618,8 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
       </GestureDetector>
       {ENABLE_COLLIDER_DEBUG_UI && (
         <>
-          <View
-            pointerEvents="none"
-            style={[
-              styles.debugProbeLine,
-              { left: width * 0.25 + (CHAR_SIZE * CHAR_SCALE) / 2 },
-            ]}
-          />
           <View pointerEvents="none" style={[styles.debugHud, { top: 8 }]}>
-            <Text style={styles.debugHudText}>DEBUG COLLIDERS ON</Text>
+            <Text style={styles.debugHudText}>BOX COLLIDERS ON</Text>
           </View>
         </>
       )}
@@ -645,14 +681,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#2b2b2b',
     letterSpacing: 2,
-  },
-  debugProbeLine: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    width: 2,
-    backgroundColor: '#00ff88',
-    opacity: 0.8,
   },
   debugHud: {
     position: 'absolute',
