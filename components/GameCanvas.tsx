@@ -179,7 +179,7 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
     const isDying = dying.value === 1;
     simTimeMs.value += dt;
 
-    if (!isDying) {
+    if (dying.value === 0) {
       totalScroll.value += RUN_SPEED * (dt / 1000);
     }
 
