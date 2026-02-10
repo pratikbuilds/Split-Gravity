@@ -1,0 +1,44 @@
+[
+  {
+    "id": "flip_gravity",
+    "prompt": "Short arcade gravity flip sound, crisp synthetic swoop with subtle click at onset, energetic and clean, no background ambience",
+    "duration_seconds": 1.1,
+    "output_path": "assets/audio/sfx/flip_gravity.wav",
+    "tags": ["gameplay", "movement", "arcade"]
+  },
+  {
+    "id": "game_over_stinger",
+    "prompt": "Retro game over stinger, descending tonal hit with slight distortion tail, dramatic but not harsh, no voice",
+    "duration_seconds": 1.6,
+    "output_path": "assets/audio/sfx/game_over_stinger.wav",
+    "tags": ["ui", "fail", "stinger"]
+  },
+  {
+    "id": "ui_click",
+    "prompt": "Minimal UI click for mobile game button press, short tactile pop, clear transients, no reverb",
+    "duration_seconds": 0.45,
+    "output_path": "assets/audio/sfx/ui_click.wav",
+    "tags": ["ui", "button"]
+  },
+  {
+    "id": "run_start_whoosh",
+    "prompt": "Fast start whoosh for side scroller acceleration, airy rush with light bass bump, polished arcade style",
+    "duration_seconds": 0.9,
+    "output_path": "assets/audio/sfx/run_start_whoosh.wav",
+    "tags": ["movement", "speed"]
+  },
+  {
+    "id": "land_thud",
+    "prompt": "Compact cartoony land thud for character impact, warm low-end thump with short dusty tail",
+    "duration_seconds": 0.8,
+    "output_path": "assets/audio/sfx/land_thud.wav",
+    "tags": ["impact", "physics"]
+  },
+  {
+    "id": "near_miss_swoosh",
+    "prompt": "Quick near-miss swoosh, tight lateral pass-by effect, bright and airy, very short",
+    "duration_seconds": 0.7,
+    "output_path": "assets/audio/sfx/near_miss_swoosh.wav",
+    "tags": ["danger", "feedback"]
+  }
+]

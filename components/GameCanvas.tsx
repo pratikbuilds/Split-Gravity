@@ -1,11 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  useWindowDimensions,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import {
@@ -26,14 +20,15 @@ import {
   useImage,
   useRSXformBuffer,
 } from '@shopify/react-native-skia';
-import type { Chunk } from '../types/game';
+import type { Chunk, GameAudioEvent, GameResult } from '../types/game';
 import { generateLevelChunks, preGenerateLevelChunks } from '../utils/levelGenerator';
 import { GAME_BACKGROUNDS } from '../utils/backgrounds';
 import { FLAT_ZONE_LENGTH } from '../types/game';
 
 type GameCanvasProps = {
   onExit?: () => void;
-  onGameOver?: (score: number) => void;
+  onGameOver?: (result: GameResult) => void;
+  onAudioEvent?: (event: GameAudioEvent) => void;
   backgroundIndex?: number;
 };
 
@@ -53,18 +48,24 @@ const DEATH_MARGIN_FRACTION = 1.0; // 1.0 = full character height below surface
 const FLIP_ARC_FORWARD = 80; // horizontal boost (px) during flip arc
 const FLIP_ARC_DECAY = 0.96; // per-frame decay of flip velocity
 // Flip this to true when you want collider/probe debug visuals in the UI.
-const ENABLE_COLLIDER_DEBUG_UI = true;
+const ENABLE_COLLIDER_DEBUG_UI = false;
 const COYOTE_TIME_MS = 140; // allow jump shortly after leaving an edge
 const EDGE_CONTACT_MARGIN = 4; // shrink feet bounds to avoid 1px cling
 const SUPPORT_MIN_OVERLAP = 6; // minimum overlap required to stay supported
 const LANDING_MIN_OVERLAP = 2; // more forgiving overlap for snap-to-landing checks
 const BACKGROUND_TILE_SCALE = 5;
 const BACKGROUND_SCROLL_FACTOR = 0.2;
+const PLAYER_X_FACTOR = 0.2;
 
 const tileSize = TILEMAP_SIZE * GROUND_SCALE;
 const groundHeight = 2 * tileSize;
 
-export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanvasProps) => {
+export const GameCanvas = ({
+  onExit,
+  onGameOver,
+  onAudioEvent,
+  backgroundIndex = 0,
+}: GameCanvasProps) => {
   const { width, height } = useWindowDimensions();
   const totalBackgrounds = GAME_BACKGROUNDS.length;
   const safeBackgroundIndex =
@@ -105,8 +106,15 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
 
   const onGameOverRef = useRef(onGameOver);
   onGameOverRef.current = onGameOver;
-  const triggerGameOver = useCallback((score: number) => {
-    onGameOverRef.current?.(score);
+  const onAudioEventRef = useRef(onAudioEvent);
+  onAudioEventRef.current = onAudioEvent;
+  const triggerGameOver = useCallback((playerScore: number) => {
+    onGameOverRef.current?.({
+      playerScore,
+    });
+  }, []);
+  const triggerAudioEvent = useCallback((event: GameAudioEvent) => {
+    onAudioEventRef.current?.(event);
   }, []);
 
   useEffect(() => {
@@ -114,12 +122,40 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
       const gY = height - groundHeight;
       groundY.value = gY;
       posY.value = gY - CHAR_SIZE * CHAR_SCALE;
-      charX.value = width * 0.25;
+      velocityY.value = 0;
+      gravityDirection.value = 1;
+      velocityX.value = 0;
+      totalScroll.value = 0;
+      gameOver.value = 0;
+      dying.value = 0;
+      deathScore.value = 0;
+      simTimeMs.value = 0;
+      elapsedMs.value = 0;
+      frameIndex.value = 0;
+      charX.value = width * PLAYER_X_FACTOR;
       const initialChunks = preGenerateLevelChunks(width, height, gY, tileSize);
       setChunks(initialChunks);
+      setScore(0);
       initialized.value = 1;
     }
-  }, [height, width]);
+  }, [
+    charX,
+    deathScore,
+    dying,
+    elapsedMs,
+    frameIndex,
+    gameOver,
+    gravityDirection,
+    groundY,
+    height,
+    initialized,
+    posY,
+    simTimeMs,
+    totalScroll,
+    velocityX,
+    velocityY,
+    width,
+  ]);
 
   // Update platform rects for worklet when platforms change
   useEffect(() => {
@@ -140,7 +176,7 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
       }
     }
     platformRects.value = rects;
-  }, [platforms]);
+  }, [platformRects, platforms]);
 
   // Spawn chunks when totalScroll advances
   const lastSpawnRef = useRef(0);
@@ -151,18 +187,11 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
 
     const gY = groundY.value;
     const currentChunks = chunksRef.current;
-    const newChunks = generateLevelChunks(
-      scroll,
-      width,
-      height,
-      gY,
-      tileSize,
-      currentChunks
-    );
+    const newChunks = generateLevelChunks(scroll, width, height, gY, tileSize, currentChunks);
     if (newChunks.length > currentChunks.length) {
       setChunks(newChunks);
     }
-  }, [height, width]);
+  }, [groundY, height, totalScroll, width]);
 
   const lastSpawnAt = useSharedValue(0);
   const lastScoreAt = useSharedValue(0);
@@ -183,11 +212,9 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
   useFrameCallback((frameInfo) => {
     'worklet';
     if (gameOver.value === 1) return;
-
     if (initialized.value === 0) return;
 
     const gY = groundY.value;
-
     const dt = frameInfo.timeSincePreviousFrame ?? 16;
     const charH = CHAR_SIZE * CHAR_SCALE;
     const charW = CHAR_SIZE * CHAR_SCALE;
@@ -223,7 +250,6 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
       const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
       if (overlap < LANDING_MIN_OVERLAP) continue;
 
-      // Ignore top lane surface for downward land/death checks.
       if (py >= groundHeight) {
         const crossedDown = prevBottom <= py + GROUNDED_EPSILON && charBottom >= py;
         const alreadyOnSurface = Math.abs(prevBottom - py) <= GROUNDED_EPSILON;
@@ -238,10 +264,7 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
       const bottomSurface = py + ph;
       const crossedUp = prevTop >= bottomSurface - GROUNDED_EPSILON && charTop <= bottomSurface;
       const alreadyOnCeiling = Math.abs(prevTop - bottomSurface) <= GROUNDED_EPSILON;
-      if (
-        bottomSurface > nearestUpSurface &&
-        (crossedUp || alreadyOnCeiling)
-      ) {
+      if (bottomSurface > nearestUpSurface && (crossedUp || alreadyOnCeiling)) {
         nearestUpSurface = bottomSurface;
       }
     }
@@ -266,7 +289,6 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
         velocityY.value = 0;
       }
 
-      // Flip arc: apply horizontal boost when in air, zero when grounded
       let onBottom = false;
       let onTop = false;
       if (gDir === 1) {
@@ -338,6 +360,7 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
       const offscreenUp = posY.value + charH < -charH;
       if ((gDir === 1 && offscreenDown) || (gDir === -1 && offscreenUp)) {
         gameOver.value = 1;
+        scheduleOnRN(triggerAudioEvent, 'game_over');
         scheduleOnRN(triggerGameOver, deathScore.value);
         return;
       }
@@ -366,7 +389,6 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
         const footRight = charWorldX + charW - EDGE_CONTACT_MARGIN;
         const canUseCoyote = simTimeMs.value - lastGroundedAtMs.value <= COYOTE_TIME_MS;
 
-        // Only allow flip when grounded (on floor, platform, or ceiling)
         let onBottom = false;
         if (gDir === 1) {
           onBottom = inFlatZone && Math.abs(posY.value - (gY - charH)) <= GROUNDED_EPSILON;
@@ -408,12 +430,27 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
         }
 
         if (onBottom || onTop || canUseCoyote) {
+          scheduleOnRN(triggerAudioEvent, 'flip');
           gravityDirection.value = -gDir;
           velocityY.value = 0;
           velocityX.value = FLIP_ARC_FORWARD;
         }
       }),
-    []
+    [
+      charX,
+      dying,
+      gameOver,
+      gravityDirection,
+      groundY,
+      lastGroundedAtMs,
+      platformRects,
+      posY,
+      simTimeMs,
+      totalScroll,
+      triggerAudioEvent,
+      velocityX,
+      velocityY,
+    ]
   );
 
   const characterTransforms = useRSXformBuffer(1, (val) => {
@@ -494,7 +531,9 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
           const y = Math.round(p.y);
           const h = Math.round(p.height);
           const hasLeftNeighbor = endEdges.has(`${p.surface}:${y}:${h}:${Math.round(p.x)}`);
-          const hasRightNeighbor = startEdges.has(`${p.surface}:${y}:${h}:${Math.round(p.x + p.width)}`);
+          const hasRightNeighbor = startEdges.has(
+            `${p.surface}:${y}:${h}:${Math.round(p.x + p.width)}`
+          );
           const cols = Math.ceil(p.width / tileSize);
           const rows = Math.ceil(p.height / tileSize);
           for (let row = 0; row < rows; row++) {
@@ -513,8 +552,7 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
               const remainingWidth = p.width - col * tileSize;
               const drawWidth = Math.min(tileSize, remainingWidth);
               if (drawWidth <= 0) continue;
-              const tileIndex =
-                col === 0 ? leftTile : col === cols - 1 ? rightTile : tiles.center;
+              const tileIndex = col === 0 ? leftTile : col === cols - 1 ? rightTile : tiles.center;
               const srcRect = getSrcRect(tileIndex);
               const srcWidth = (drawWidth / tileSize) * TILEMAP_SIZE;
               const clippedSrcRect = Skia.XYWHRect(srcRect.x, srcRect.y, srcWidth, srcRect.height);
@@ -588,6 +626,7 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
   return (
     <View style={[styles.container, { width, height }]}>
       <View style={styles.scoreWrapper}>
+        <Text style={styles.scoreLabel}>SCORE</Text>
         <Text style={styles.scoreText}>{score}m</Text>
       </View>
       <GestureDetector gesture={tapGesture}>
@@ -617,11 +656,9 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanv
         </Canvas>
       </GestureDetector>
       {ENABLE_COLLIDER_DEBUG_UI && (
-        <>
-          <View pointerEvents="none" style={[styles.debugHud, { top: 8 }]}>
-            <Text style={styles.debugHudText}>BOX COLLIDERS ON</Text>
-          </View>
-        </>
+        <View pointerEvents="none" style={[styles.debugHud, { top: 8 }]}>
+          <Text style={styles.debugHudText}>BOX COLLIDERS ON</Text>
+        </View>
       )}
       {onExit && (
         <View style={styles.exitWrapper}>
@@ -651,6 +688,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 24,
     zIndex: 10,
+  },
+  scoreLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#687080',
+    letterSpacing: 1.2,
   },
   scoreText: {
     fontSize: 18,

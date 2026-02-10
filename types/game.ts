@@ -14,6 +14,12 @@ export interface Chunk {
   difficulty: 'flat' | 'easy' | 'medium' | 'hard';
 }
 
+export interface GameResult {
+  playerScore: number;
+}
+
+export type GameAudioEvent = 'flip' | 'game_over' | 'run_start' | 'land' | 'near_miss';
+
 // Reachability constants (tune from physics)
 export const MAX_FLIP_HORIZONTAL = 120; // px horizontal distance per flip arc
 export const MIN_LANDING_WIDTH = 48; // min platform width to land safely
