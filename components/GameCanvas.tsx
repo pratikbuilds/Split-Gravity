@@ -1,14 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import {
-  runOnJS,
   useAnimatedReaction,
   useDerivedValue,
   useFrameCallback,
   useSharedValue,
 } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import {
   Atlas,
   Canvas,
@@ -20,8 +26,9 @@ import {
   useImage,
   useRSXformBuffer,
 } from '@shopify/react-native-skia';
-import type { Chunk, Platform } from '../types/game';
+import type { Chunk } from '../types/game';
 import { generateLevelChunks, preGenerateLevelChunks } from '../utils/levelGenerator';
+import { GAME_BACKGROUNDS } from '../utils/backgrounds';
 import { FLAT_ZONE_LENGTH } from '../types/game';
 
 type GameCanvasProps = {
@@ -41,18 +48,32 @@ const CHAR_SCALE = 1.5;
 const CHAR_SIZE = 24;
 const FRAME_INTERVAL_MS = 100;
 const GROUNDED_EPSILON = 4;
-// Player must fully enter ditch (entire character below surface) before game over
+// Player must fully enter ditch before death-fall starts.
 const DEATH_MARGIN_FRACTION = 1.0; // 1.0 = full character height below surface
 const FLIP_ARC_FORWARD = 80; // horizontal boost (px) during flip arc
 const FLIP_ARC_DECAY = 0.96; // per-frame decay of flip velocity
+// Flip this to true when you want collider/probe debug visuals in the UI.
+const ENABLE_COLLIDER_DEBUG_UI = false;
+const COYOTE_TIME_MS = 140; // allow jump shortly after leaving an edge
+const EDGE_CONTACT_MARGIN = 4; // shrink feet bounds to avoid 1px cling
+const EDGE_MIN_OVERLAP = 6; // minimum horizontal overlap to count as support
+const BACKGROUND_TILE_SCALE = 5;
+const BACKGROUND_SCROLL_FACTOR = 0.2;
 
 const tileSize = TILEMAP_SIZE * GROUND_SCALE;
-const groundRows = 2;
-const groundHeight = groundRows * tileSize;
+const groundHeight = 2 * tileSize;
 
-export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 1 }: GameCanvasProps) => {
+export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 0 }: GameCanvasProps) => {
   const { width, height } = useWindowDimensions();
+  const totalBackgrounds = GAME_BACKGROUNDS.length;
+  const safeBackgroundIndex =
+    totalBackgrounds > 0
+      ? ((backgroundIndex % totalBackgrounds) + totalBackgrounds) % totalBackgrounds
+      : 0;
+  const backgroundSource = GAME_BACKGROUNDS[safeBackgroundIndex];
 
+  const backgroundImage = useImage(backgroundSource);
+  const backgroundTileWidth = backgroundImage ? backgroundImage.width() * BACKGROUND_TILE_SCALE : 0;
   const tilemapImage = useImage(require('../assets/game/terrain.png'));
   const characterImage = useImage(
     require('../assets/platform assets/Tilemap/tilemap-characters_packed.png')
@@ -65,11 +86,14 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 1 }: GameCanv
   const frameIndex = useSharedValue(0);
   const elapsedMs = useSharedValue(0);
   const gameOver = useSharedValue(0); // 0 = playing, 1 = dead
+  const dying = useSharedValue(0); // 0 = alive, 1 = death fall in progress
+  const deathScore = useSharedValue(0);
   const velocityX = useSharedValue(0); // flip arc horizontal boost
   const totalScroll = useSharedValue(0); // cumulative world scroll (never wraps)
-  const groundPictureWidthSv = useSharedValue(0);
   const initialized = useSharedValue(0); // 0 = not yet, 1 = ready
   const charX = useSharedValue(0);
+  const simTimeMs = useSharedValue(0);
+  const lastGroundedAtMs = useSharedValue(0);
 
   const [chunks, setChunks] = useState<Chunk[]>([]);
   const [score, setScore] = useState(0);
@@ -131,11 +155,11 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 1 }: GameCanv
     (scroll) => {
       if (scroll - lastSpawnAt.value >= 300) {
         lastSpawnAt.value = scroll;
-        runOnJS(spawnChunks)();
+        scheduleOnRN(spawnChunks);
       }
       if (scroll - lastScoreAt.value >= 50) {
         lastScoreAt.value = scroll;
-        runOnJS(setScore)(Math.floor(scroll));
+        scheduleOnRN(setScore, Math.floor(scroll));
       }
     }
   );
@@ -150,9 +174,14 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 1 }: GameCanv
 
     const dt = frameInfo.timeSincePreviousFrame ?? 16;
     const charH = CHAR_SIZE * CHAR_SCALE;
+    const charW = CHAR_SIZE * CHAR_SCALE;
     const gDir = gravityDirection.value;
+    const isDying = dying.value === 1;
+    simTimeMs.value += dt;
 
-    totalScroll.value += RUN_SPEED * (dt / 1000);
+    if (!isDying) {
+      totalScroll.value += RUN_SPEED * (dt / 1000);
+    }
 
     velocityY.value += gDir * GRAVITY * (dt / 1000);
     posY.value += velocityY.value * (dt / 1000);
@@ -160,75 +189,137 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 1 }: GameCanv
     const charWorldX = totalScroll.value + charX.value;
     const rects = platformRects.value;
     const inFlatZone = charWorldX < FLAT_ZONE_LENGTH;
+    const charTop = posY.value;
+    const charBottom = posY.value + charH;
+    const footLeft = charWorldX + EDGE_CONTACT_MARGIN;
+    const footRight = charWorldX + charW - EDGE_CONTACT_MARGIN;
 
-    // Flat zone: always use ground collision (original behavior - no death)
-    if (inFlatZone) {
-      if (gDir === 1 && posY.value + charH >= gY) {
+    let nearestDownSurface = Number.POSITIVE_INFINITY;
+    let farthestDownSurface = Number.NEGATIVE_INFINITY;
+    let nearestUpSurface = Number.NEGATIVE_INFINITY;
+    for (let i = 0; i < rects.length; i += 4) {
+      const px = rects[i];
+      const py = rects[i + 1];
+      const pw = rects[i + 2];
+      const ph = rects[i + 3];
+      const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
+      if (overlap < EDGE_MIN_OVERLAP) continue;
+
+      // Ignore top lane surface for downward land/death checks.
+      if (py >= groundHeight) {
+        if (py < nearestDownSurface && charBottom >= py && charTop <= py) {
+          nearestDownSurface = py;
+        }
+        if (py > farthestDownSurface) {
+          farthestDownSurface = py;
+        }
+      }
+
+      const bottomSurface = py + ph;
+      if (
+        bottomSurface > nearestUpSurface &&
+        charTop <= bottomSurface &&
+        charBottom >= bottomSurface
+      ) {
+        nearestUpSurface = bottomSurface;
+      }
+    }
+
+    if (!inFlatZone && !isDying) {
+      if (gDir === 1) {
+        const floorY = farthestDownSurface > Number.NEGATIVE_INFINITY ? farthestDownSurface : gY;
+        const deathThreshold = floorY + charH * DEATH_MARGIN_FRACTION;
+        if (charBottom > deathThreshold) {
+          dying.value = 1;
+          deathScore.value = Math.floor(totalScroll.value);
+          velocityX.value = 0;
+        }
+      } else if (charTop < -charH * DEATH_MARGIN_FRACTION) {
+        dying.value = 1;
+        deathScore.value = Math.floor(totalScroll.value);
+        velocityX.value = 0;
+      }
+    }
+
+    if (dying.value === 1) {
+      const offscreenDown = posY.value > height + charH;
+      const offscreenUp = posY.value + charH < -charH;
+      if ((gDir === 1 && offscreenDown) || (gDir === -1 && offscreenUp)) {
+        gameOver.value = 1;
+        scheduleOnRN(triggerGameOver, deathScore.value);
+        return;
+      }
+    }
+
+    if (!isDying) {
+      if (gDir === 1 && velocityY.value > 0 && nearestDownSurface < Number.POSITIVE_INFINITY) {
+        posY.value = nearestDownSurface - charH;
+        velocityY.value = 0;
+      }
+
+      if (gDir === -1 && velocityY.value < 0 && nearestUpSurface > Number.NEGATIVE_INFINITY) {
+        posY.value = nearestUpSurface;
+        velocityY.value = 0;
+      }
+
+      if (gDir === 1 && inFlatZone && posY.value + charH >= gY) {
         posY.value = gY - charH;
         velocityY.value = 0;
       }
-    } else {
-      // Easy+ zone: platform collision + death
-      let lowestSurfaceY = gY;
-      for (let i = 0; i < rects.length; i += 4) {
-        const px = rects[i];
-        const py = rects[i + 1];
-        const pw = rects[i + 2];
-        if (charWorldX >= px && charWorldX <= px + pw && py > lowestSurfaceY) {
-          lowestSurfaceY = py;
+      if (gDir === -1 && inFlatZone && posY.value <= groundHeight) {
+        posY.value = groundHeight;
+        velocityY.value = 0;
+      }
+
+      // Flip arc: apply horizontal boost when in air, zero when grounded
+      let onBottom = false;
+      let onTop = false;
+      if (gDir === 1) {
+        onBottom = inFlatZone && Math.abs(posY.value - (gY - charH)) <= GROUNDED_EPSILON;
+        if (!onBottom) {
+          for (let i = 0; i < rects.length; i += 4) {
+            const px = rects[i];
+            const py = rects[i + 1];
+            const pw = rects[i + 2];
+            const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
+            if (overlap >= EDGE_MIN_OVERLAP && py >= groundHeight) {
+              if (Math.abs(posY.value - (py - charH)) <= GROUNDED_EPSILON) {
+                onBottom = true;
+                break;
+              }
+            }
+          }
         }
-      }
-
-      const deathThreshold = lowestSurfaceY + charH * DEATH_MARGIN_FRACTION;
-      if (posY.value + charH > deathThreshold) {
-        gameOver.value = 1;
-        runOnJS(triggerGameOver)(Math.floor(totalScroll.value));
-        return;
-      }
-
-      if (gDir === 1 && velocityY.value > 0) {
-        let landed = false;
-        for (let i = 0; i < rects.length; i += 4) {
-          const px = rects[i];
-          const py = rects[i + 1];
-          const pw = rects[i + 2];
-          if (charWorldX >= px && charWorldX <= px + pw && posY.value + charH >= py) {
-            posY.value = py - charH;
-            velocityY.value = 0;
-            landed = true;
-            break;
+      } else {
+        onTop = inFlatZone && Math.abs(posY.value - groundHeight) <= GROUNDED_EPSILON;
+        if (!onTop) {
+          for (let i = 0; i < rects.length; i += 4) {
+            const px = rects[i];
+            const py = rects[i + 1];
+            const pw = rects[i + 2];
+            const ph = rects[i + 3];
+            const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
+            if (overlap >= EDGE_MIN_OVERLAP) {
+              if (Math.abs(posY.value - (py + ph)) <= GROUNDED_EPSILON) {
+                onTop = true;
+                break;
+              }
+            }
           }
         }
       }
-    }
 
-    // Top ground collision (falling up, gravity = -1)
-    if (gDir === -1 && posY.value <= groundHeight) {
-      posY.value = groundHeight;
-      velocityY.value = 0;
-    }
-
-    // Flip arc: apply horizontal boost when in air, zero when grounded
-    let onBottom = gDir === 1 && posY.value >= gY - charH - GROUNDED_EPSILON;
-    if (gDir === 1 && !onBottom) {
-      for (let i = 0; i < rects.length; i += 4) {
-        const px = rects[i];
-        const py = rects[i + 1];
-        const pw = rects[i + 2];
-        if (charWorldX >= px && charWorldX <= px + pw && posY.value >= py - charH - GROUNDED_EPSILON) {
-          onBottom = true;
-          break;
-        }
+      const grounded = onBottom || onTop;
+      if (grounded) {
+        lastGroundedAtMs.value = simTimeMs.value;
+        velocityX.value = 0;
+      } else if (velocityX.value > 0) {
+        totalScroll.value += velocityX.value * (dt / 1000);
+        velocityX.value *= FLIP_ARC_DECAY;
+        if (velocityX.value < 1) velocityX.value = 0;
       }
-    }
-    const onTop = gDir === -1 && posY.value <= groundHeight + GROUNDED_EPSILON;
-    const grounded = onBottom || onTop;
-    if (grounded) {
+    } else {
       velocityX.value = 0;
-    } else if (velocityX.value > 0) {
-      totalScroll.value += velocityX.value * (dt / 1000);
-      velocityX.value *= FLIP_ARC_DECAY;
-      if (velocityX.value < 1) velocityX.value = 0;
     }
 
     elapsedMs.value += dt;
@@ -242,25 +333,31 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 1 }: GameCanv
     () =>
       Gesture.Tap().onEnd(() => {
         'worklet';
-        if (gameOver.value === 1) return;
+        if (gameOver.value === 1 || dying.value === 1) return;
 
         const gY = groundY.value;
         const charH = CHAR_SIZE * CHAR_SCALE;
+        const charW = CHAR_SIZE * CHAR_SCALE;
         const gDir = gravityDirection.value;
         const charWorldX = totalScroll.value + charX.value;
+        const inFlatZone = charWorldX < FLAT_ZONE_LENGTH;
+        const footLeft = charWorldX + EDGE_CONTACT_MARGIN;
+        const footRight = charWorldX + charW - EDGE_CONTACT_MARGIN;
+        const canUseCoyote = simTimeMs.value - lastGroundedAtMs.value <= COYOTE_TIME_MS;
 
         // Only allow flip when grounded (on floor, platform, or ceiling)
         let onBottom = false;
         if (gDir === 1) {
-          onBottom = posY.value >= gY - charH - GROUNDED_EPSILON;
+          onBottom = inFlatZone && posY.value >= gY - charH - GROUNDED_EPSILON;
           if (!onBottom) {
             const rects = platformRects.value;
             for (let i = 0; i < rects.length; i += 4) {
               const px = rects[i];
               const py = rects[i + 1];
               const pw = rects[i + 2];
-              if (charWorldX >= px && charWorldX <= px + pw) {
-                if (posY.value >= py - charH - GROUNDED_EPSILON) {
+              const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
+              if (overlap >= EDGE_MIN_OVERLAP && py >= groundHeight) {
+                if (Math.abs(posY.value - (py - charH)) <= GROUNDED_EPSILON) {
                   onBottom = true;
                   break;
                 }
@@ -268,9 +365,28 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 1 }: GameCanv
             }
           }
         }
-        const onTop = gDir === -1 && posY.value <= groundHeight + GROUNDED_EPSILON;
+        let onTop = false;
+        if (gDir === -1) {
+          onTop = inFlatZone && posY.value <= groundHeight + GROUNDED_EPSILON;
+          if (!onTop) {
+            const rects = platformRects.value;
+            for (let i = 0; i < rects.length; i += 4) {
+              const px = rects[i];
+              const py = rects[i + 1];
+              const pw = rects[i + 2];
+              const ph = rects[i + 3];
+              const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
+              if (overlap >= EDGE_MIN_OVERLAP) {
+                if (Math.abs(posY.value - (py + ph)) <= GROUNDED_EPSILON) {
+                  onTop = true;
+                  break;
+                }
+              }
+            }
+          }
+        }
 
-        if (onBottom || onTop) {
+        if (onBottom || onTop || canUseCoyote) {
           gravityDirection.value = -gDir;
           velocityY.value = 0;
           velocityX.value = FLIP_ARC_FORWARD;
@@ -294,61 +410,35 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 1 }: GameCanv
     return [rect(frame * CHAR_SIZE, 0, CHAR_SIZE, CHAR_SIZE)];
   });
 
-  const topGroundPicture = useMemo(() => {
-    if (!tilemapImage || width <= 0 || height <= 0) return null;
-    // Wide strip + extra tile to avoid seam at wrap; use integer multiple of tileSize for clean repeat
-    const groundWidth = Math.ceil((3 * width) / tileSize) * tileSize + tileSize;
-    const cols = Math.ceil(groundWidth / tileSize) + 1;
+  const backgroundPicture = useMemo(() => {
+    if (!backgroundImage || width <= 0 || height <= 0) return null;
+
     const paint = Skia.Paint();
     paint.setAntiAlias(false);
-    const getSrcRect = (tileIndex: number) => {
-      const col = tileIndex % TILEMAP_COLS;
-      const row = Math.floor(tileIndex / TILEMAP_COLS);
-      return Skia.XYWHRect(col * TILEMAP_SIZE, row * TILEMAP_SIZE, TILEMAP_SIZE, TILEMAP_SIZE);
-    };
-    // Terrain (16x16).png green set:
-    // top row: r0 c6/c7/c8, fill row: r1 c6/c7/c8
-    const GRASS = { left: 6, center: 7, right: 8 };
-    const DIRT = { left: 28, center: 29, right: 30 };
+
+    const sourceWidth = backgroundImage.width();
+    const sourceHeight = backgroundImage.height();
+    const tileWidth = sourceWidth * BACKGROUND_TILE_SCALE;
+    const tileHeight = sourceHeight * BACKGROUND_TILE_SCALE;
+    const srcRect = Skia.XYWHRect(0, 0, sourceWidth, sourceHeight);
+
     return createPicture(
       (canvas) => {
-        // Flip vertically so grass faces downward (toward play area)
-        canvas.save();
-        canvas.translate(0, groundHeight);
-        canvas.scale(1, -1);
-        // Draw same layout as bottom ground: grass row 0, dirt row 1
-        for (let row = 0; row < groundRows; row++) {
-          const isSurface = row === 0;
-          const tiles = isSurface ? GRASS : DIRT;
-          for (let col = 0; col < cols; col++) {
-            const tileIndex =
-              col === 0 ? tiles.left : col === cols - 1 ? tiles.right : tiles.center;
-            const srcRect = getSrcRect(tileIndex);
-            const x = Math.floor(col * tileSize);
-            const y = Math.floor(row * tileSize);
-            const dst = Skia.XYWHRect(x, y, tileSize, tileSize);
-            canvas.drawImageRect(tilemapImage, srcRect, dst, paint);
+        for (let y = -tileHeight; y < height + tileHeight; y += tileHeight) {
+          for (let x = -tileWidth; x < width + tileWidth; x += tileWidth) {
+            const dstRect = Skia.XYWHRect(x, y, tileWidth, tileHeight);
+            canvas.drawImageRect(backgroundImage, srcRect, dstRect, paint);
           }
         }
-        canvas.restore();
       },
-      Skia.XYWHRect(0, 0, groundWidth, groundHeight)
+      Skia.XYWHRect(-tileWidth, -tileHeight, width + tileWidth * 2, height + tileHeight * 2)
     );
-  }, [tilemapImage, width, height]);
-
-  const groundPictureWidth = useMemo(() => {
-    const w = Math.ceil((3 * width) / tileSize) * tileSize + tileSize;
-    return w;
-  }, [width]);
-  useEffect(() => {
-    groundPictureWidthSv.value = groundPictureWidth;
-  }, [groundPictureWidth]);
-  const groundTransform = useDerivedValue(() => {
-    'worklet';
-    const w = groundPictureWidthSv.value || 1;
-    const offset = totalScroll.value % w;
+  }, [backgroundImage, width, height]);
+  const backgroundTransform = useDerivedValue(() => {
+    if (backgroundTileWidth <= 0) return [{ translateX: 0 }];
+    const offset = (totalScroll.value * BACKGROUND_SCROLL_FACTOR) % backgroundTileWidth;
     return [{ translateX: -offset }];
-  });
+  }, [backgroundTileWidth]);
 
   const platformsPicture = useMemo(() => {
     if (!tilemapImage || width <= 0 || height <= 0 || platforms.length === 0) return null;
@@ -369,8 +459,8 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 1 }: GameCanv
     for (const p of platforms) {
       const y = Math.round(p.y);
       const h = Math.round(p.height);
-      startEdges.add(`${y}:${h}:${Math.round(p.x)}`);
-      endEdges.add(`${y}:${h}:${Math.round(p.x + p.width)}`);
+      startEdges.add(`${p.surface}:${y}:${h}:${Math.round(p.x)}`);
+      endEdges.add(`${p.surface}:${y}:${h}:${Math.round(p.x + p.width)}`);
     }
 
     const margin = tileSize * 2;
@@ -380,12 +470,12 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 1 }: GameCanv
         for (const p of platforms) {
           const y = Math.round(p.y);
           const h = Math.round(p.height);
-          const hasLeftNeighbor = endEdges.has(`${y}:${h}:${Math.round(p.x)}`);
-          const hasRightNeighbor = startEdges.has(`${y}:${h}:${Math.round(p.x + p.width)}`);
+          const hasLeftNeighbor = endEdges.has(`${p.surface}:${y}:${h}:${Math.round(p.x)}`);
+          const hasRightNeighbor = startEdges.has(`${p.surface}:${y}:${h}:${Math.round(p.x + p.width)}`);
           const cols = Math.ceil(p.width / tileSize);
           const rows = Math.ceil(p.height / tileSize);
           for (let row = 0; row < rows; row++) {
-            const isSurface = row === 0;
+            const isSurface = p.surface === 'top' ? row === rows - 1 : row === 0;
             const tiles = isSurface ? GRASS : DIRT;
             const leftTile = hasLeftNeighbor ? tiles.center : tiles.left;
             const rightTile = hasRightNeighbor ? tiles.center : tiles.right;
@@ -405,6 +495,42 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 1 }: GameCanv
     );
   }, [tilemapImage, height, width, platforms]);
 
+  const colliderDebugPicture = useMemo(() => {
+    if (!ENABLE_COLLIDER_DEBUG_UI || width <= 0 || height <= 0 || platforms.length === 0)
+      return null;
+    const stroke = Skia.Paint();
+    stroke.setStyle(1);
+    stroke.setStrokeWidth(2);
+    stroke.setColor(Skia.Color('#00e5ff'));
+    stroke.setAntiAlias(false);
+
+    const topStroke = Skia.Paint();
+    topStroke.setStyle(1);
+    topStroke.setStrokeWidth(2);
+    topStroke.setColor(Skia.Color('#ff4d4f'));
+    topStroke.setAntiAlias(false);
+
+    const guide = Skia.Paint();
+    guide.setStyle(1);
+    guide.setStrokeWidth(1);
+    guide.setColor(Skia.Color('#ffffff'));
+    guide.setAntiAlias(false);
+
+    const maxX = Math.max(...platforms.map((p) => p.x + p.width), width * 3) + tileSize * 2;
+    const gY = height - groundHeight;
+    return createPicture(
+      (canvas) => {
+        for (const p of platforms) {
+          const r = Skia.XYWHRect(p.x, p.y, p.width, p.height);
+          canvas.drawRect(r, p.surface === 'top' ? topStroke : stroke);
+        }
+        canvas.drawLine(0, gY, maxX, gY, guide);
+        canvas.drawLine(0, groundHeight, maxX, groundHeight, guide);
+      },
+      Skia.XYWHRect(0, 0, maxX, height)
+    );
+  }, [height, width, platforms]);
+
   const platformsTransform = useDerivedValue(() => {
     return [{ translateX: -totalScroll.value }];
   });
@@ -423,14 +549,19 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 1 }: GameCanv
       </View>
       <GestureDetector gesture={tapGesture}>
         <Canvas style={styles.canvas}>
-          {topGroundPicture && (
-            <Group transform={groundTransform}>
-              <Picture picture={topGroundPicture} />
+          {backgroundPicture && (
+            <Group transform={backgroundTransform}>
+              <Picture picture={backgroundPicture} />
             </Group>
           )}
           {platformsPicture && (
             <Group transform={platformsTransform}>
               <Picture picture={platformsPicture} />
+            </Group>
+          )}
+          {colliderDebugPicture && (
+            <Group transform={platformsTransform}>
+              <Picture picture={colliderDebugPicture} />
             </Group>
           )}
           {characterImage && (
@@ -442,6 +573,20 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 1 }: GameCanv
           )}
         </Canvas>
       </GestureDetector>
+      {ENABLE_COLLIDER_DEBUG_UI && (
+        <>
+          <View
+            pointerEvents="none"
+            style={[
+              styles.debugProbeLine,
+              { left: width * 0.25 + (CHAR_SIZE * CHAR_SCALE) / 2 },
+            ]}
+          />
+          <View pointerEvents="none" style={[styles.debugHud, { top: 8 }]}>
+            <Text style={styles.debugHudText}>DEBUG COLLIDERS ON</Text>
+          </View>
+        </>
+      )}
       {onExit && (
         <View style={styles.exitWrapper}>
           <Pressable onPress={onExit} style={styles.exitButton}>
@@ -500,5 +645,28 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#2b2b2b',
     letterSpacing: 2,
+  },
+  debugProbeLine: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 2,
+    backgroundColor: '#00ff88',
+    opacity: 0.8,
+  },
+  debugHud: {
+    position: 'absolute',
+    left: 24,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    zIndex: 10,
+  },
+  debugHudText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.8,
   },
 });

@@ -4,6 +4,7 @@ export interface Platform {
   width: number;
   height: number;
   tileType: 'grass' | 'dirt' | 'crate';
+  surface: 'bottom' | 'top' | 'pillar';
 }
 
 export interface Chunk {

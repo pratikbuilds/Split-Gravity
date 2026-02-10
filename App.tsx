@@ -5,6 +5,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { GameCanvas } from 'components/GameCanvas';
 import { HomeScreen } from 'components/HomeScreen';
+import { getRandomBackgroundIndex } from './utils/backgrounds';
 
 import './global.css';
 
@@ -13,6 +14,7 @@ export default function App() {
   const [gameKey, setGameKey] = useState(0);
   const [lastScore, setLastScore] = useState(0);
   const [gameOver, setGameOver] = useState(false);
+  const [backgroundIndex, setBackgroundIndex] = useState(() => getRandomBackgroundIndex());
 
   const handleGameOver = (score: number) => {
     setLastScore(score);
@@ -20,7 +22,14 @@ export default function App() {
   };
   const handleRestart = () => {
     setGameOver(false);
+    setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
     setGameKey((k) => k + 1);
+  };
+  const handlePlay = () => {
+    setGameOver(false);
+    setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
+    setGameKey((k) => k + 1);
+    setScreen('game');
   };
   const handleExitToHome = () => {
     setGameOver(false);
@@ -30,13 +39,14 @@ export default function App() {
   return (
     <GestureHandlerRootView style={styles.root}>
       {screen === 'home' ? (
-        <HomeScreen onPlay={() => setScreen('game')} />
+        <HomeScreen onPlay={handlePlay} />
       ) : (
         <>
           <GameCanvas
             key={gameKey}
             onExit={handleExitToHome}
             onGameOver={handleGameOver}
+            backgroundIndex={backgroundIndex}
           />
           {gameOver && (
             <View style={styles.gameOverOverlay}>
