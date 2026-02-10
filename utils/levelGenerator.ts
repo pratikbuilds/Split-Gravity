@@ -47,9 +47,7 @@ function generateChunk(
 
   const minGap = difficulty === 'easy' ? 40 : 60;
   const platformWidth =
-    difficulty === 'hard'
-      ? Math.max(MIN_LANDING_WIDTH, tileSize * 2)
-      : tileSize * 4;
+    difficulty === 'hard' ? Math.max(MIN_LANDING_WIDTH, tileSize * 2) : tileSize * 4;
 
   let x = startX;
   const numPlatforms = difficulty === 'hard' ? 4 : 3;
@@ -143,7 +141,9 @@ export function generateLevelChunks(
 
   // Trim chunks far behind to save memory
   const trimX = totalScroll - screenWidth * 2;
-  return chunks.filter((c) => c.platforms[c.platforms.length - 1].x + c.platforms[c.platforms.length - 1].width > trimX);
+  return chunks.filter(
+    (c) => c.platforms[c.platforms.length - 1].x + c.platforms[c.platforms.length - 1].width > trimX
+  );
 }
 
 /** Pre-generate many chunks so the level is fully built before the player runs. */
@@ -163,7 +163,14 @@ export function preGenerateLevelChunks(
     if (nextSpawnX >= targetDistance) break;
 
     const simulatedScroll = Math.max(0, nextSpawnX - screenWidth * 2 + 100);
-    const next = generateLevelChunks(simulatedScroll, screenWidth, screenHeight, groundY, tileSize, chunks);
+    const next = generateLevelChunks(
+      simulatedScroll,
+      screenWidth,
+      screenHeight,
+      groundY,
+      tileSize,
+      chunks
+    );
     // Only append the new chunk. generateLevelChunks trims old chunks; we must not use that trimmed
     // list or we lose the flat zone and start of level (empty screen at launch).
     if (next.length === chunks.length) break;

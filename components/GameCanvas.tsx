@@ -30,8 +30,8 @@ type GameCanvasProps = {
   backgroundIndex?: number;
 };
 
-const TILEMAP_SIZE = 18;
-const TILEMAP_COLS = 20;
+const TILEMAP_SIZE = 16;
+const TILEMAP_COLS = 22;
 const GROUND_SCALE = 2;
 
 // Physics
@@ -53,7 +53,7 @@ const groundHeight = groundRows * tileSize;
 export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 1 }: GameCanvasProps) => {
   const { width, height } = useWindowDimensions();
 
-  const tilemapImage = useImage(require('../assets/game/tilemap_packed.png'));
+  const tilemapImage = useImage(require('../assets/game/terrain.png'));
   const characterImage = useImage(
     require('../assets/platform assets/Tilemap/tilemap-characters_packed.png')
   );
@@ -306,28 +306,34 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 1 }: GameCanv
       const row = Math.floor(tileIndex / TILEMAP_COLS);
       return Skia.XYWHRect(col * TILEMAP_SIZE, row * TILEMAP_SIZE, TILEMAP_SIZE, TILEMAP_SIZE);
     };
-    const GRASS = { left: 23, center: 22, right: 21 };
-    const DIRT = { left: 123, center: 122, right: 121 };
-    return createPicture((canvas) => {
-      // Flip vertically so grass faces downward (toward play area)
-      canvas.save();
-      canvas.translate(0, groundHeight);
-      canvas.scale(1, -1);
-      // Draw same layout as bottom ground: grass row 0, dirt row 1
-      for (let row = 0; row < groundRows; row++) {
-        const isSurface = row === 0;
-        const tiles = isSurface ? GRASS : DIRT;
-        for (let col = 0; col < cols; col++) {
-          const tileIndex = col === 0 ? tiles.left : col === cols - 1 ? tiles.right : tiles.center;
-          const srcRect = getSrcRect(tileIndex);
-          const x = Math.floor(col * tileSize);
-          const y = Math.floor(row * tileSize);
-          const dst = Skia.XYWHRect(x, y, tileSize, tileSize);
-          canvas.drawImageRect(tilemapImage, srcRect, dst, paint);
+    // Terrain (16x16).png green set:
+    // top row: r0 c6/c7/c8, fill row: r1 c6/c7/c8
+    const GRASS = { left: 6, center: 7, right: 8 };
+    const DIRT = { left: 28, center: 29, right: 30 };
+    return createPicture(
+      (canvas) => {
+        // Flip vertically so grass faces downward (toward play area)
+        canvas.save();
+        canvas.translate(0, groundHeight);
+        canvas.scale(1, -1);
+        // Draw same layout as bottom ground: grass row 0, dirt row 1
+        for (let row = 0; row < groundRows; row++) {
+          const isSurface = row === 0;
+          const tiles = isSurface ? GRASS : DIRT;
+          for (let col = 0; col < cols; col++) {
+            const tileIndex =
+              col === 0 ? tiles.left : col === cols - 1 ? tiles.right : tiles.center;
+            const srcRect = getSrcRect(tileIndex);
+            const x = Math.floor(col * tileSize);
+            const y = Math.floor(row * tileSize);
+            const dst = Skia.XYWHRect(x, y, tileSize, tileSize);
+            canvas.drawImageRect(tilemapImage, srcRect, dst, paint);
+          }
         }
-      }
-      canvas.restore();
-    }, Skia.XYWHRect(0, 0, groundWidth, groundHeight));
+        canvas.restore();
+      },
+      Skia.XYWHRect(0, 0, groundWidth, groundHeight)
+    );
   }, [tilemapImage, width, height]);
 
   const groundPictureWidth = useMemo(() => {
@@ -353,21 +359,39 @@ export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 1 }: GameCanv
       const row = Math.floor(tileIndex / TILEMAP_COLS);
       return Skia.XYWHRect(col * TILEMAP_SIZE, row * TILEMAP_SIZE, TILEMAP_SIZE, TILEMAP_SIZE);
     };
-    const GRASS = { left: 23, center: 22, right: 21 };
-    const DIRT = { left: 123, center: 122, right: 121 };
+    const GRASS = { left: 6, center: 7, right: 8 };
+    const DIRT = { left: 28, center: 29, right: 30 };
+
+    // When two platforms touch edge-to-edge, render center tiles at the shared seam
+    // to avoid a dark "cap-to-cap" breaker line.
+    const startEdges = new Set<string>();
+    const endEdges = new Set<string>();
+    for (const p of platforms) {
+      const y = Math.round(p.y);
+      const h = Math.round(p.height);
+      startEdges.add(`${y}:${h}:${Math.round(p.x)}`);
+      endEdges.add(`${y}:${h}:${Math.round(p.x + p.width)}`);
+    }
+
     const margin = tileSize * 2;
     const maxX = Math.max(...platforms.map((p) => p.x + p.width), width * 3) + margin;
     return createPicture(
       (canvas) => {
         for (const p of platforms) {
+          const y = Math.round(p.y);
+          const h = Math.round(p.height);
+          const hasLeftNeighbor = endEdges.has(`${y}:${h}:${Math.round(p.x)}`);
+          const hasRightNeighbor = startEdges.has(`${y}:${h}:${Math.round(p.x + p.width)}`);
           const cols = Math.ceil(p.width / tileSize);
           const rows = Math.ceil(p.height / tileSize);
           for (let row = 0; row < rows; row++) {
             const isSurface = row === 0;
             const tiles = isSurface ? GRASS : DIRT;
+            const leftTile = hasLeftNeighbor ? tiles.center : tiles.left;
+            const rightTile = hasRightNeighbor ? tiles.center : tiles.right;
             for (let col = 0; col < cols; col++) {
               const tileIndex =
-                col === 0 ? tiles.left : col === cols - 1 ? tiles.right : tiles.center;
+                col === 0 ? leftTile : col === cols - 1 ? rightTile : tiles.center;
               const srcRect = getSrcRect(tileIndex);
               const x = Math.floor(p.x + col * tileSize);
               const y = Math.floor(p.y + row * tileSize);
