@@ -1,12 +1,17 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { useDerivedValue, useFrameCallback, useSharedValue } from 'react-native-reanimated';
+import {
+  runOnJS,
+  useAnimatedReaction,
+  useDerivedValue,
+  useFrameCallback,
+  useSharedValue,
+} from 'react-native-reanimated';
 import {
   Atlas,
   Canvas,
-  Fill,
   Group,
   Picture,
   Skia,
@@ -15,16 +20,16 @@ import {
   useImage,
   useRSXformBuffer,
 } from '@shopify/react-native-skia';
+import type { Chunk, Platform } from '../types/game';
+import { generateLevelChunks, preGenerateLevelChunks } from '../utils/levelGenerator';
+import { FLAT_ZONE_LENGTH } from '../types/game';
 
 type GameCanvasProps = {
   onExit?: () => void;
+  onGameOver?: (score: number) => void;
   backgroundIndex?: number;
 };
 
-const TILE_WIDTH = 64;
-const TILE_HEIGHT = 72;
-const TILE_COUNT = 3;
-const BACKGROUND_PARALLAX = 0.5; // background scrolls slower than ground
 const TILEMAP_SIZE = 18;
 const TILEMAP_COLS = 20;
 const GROUND_SCALE = 2;
@@ -36,15 +41,18 @@ const CHAR_SCALE = 1.5;
 const CHAR_SIZE = 24;
 const FRAME_INTERVAL_MS = 100;
 const GROUNDED_EPSILON = 4;
+// Player must fully enter ditch (entire character below surface) before game over
+const DEATH_MARGIN_FRACTION = 1.0; // 1.0 = full character height below surface
+const FLIP_ARC_FORWARD = 80; // horizontal boost (px) during flip arc
+const FLIP_ARC_DECAY = 0.96; // per-frame decay of flip velocity
 
 const tileSize = TILEMAP_SIZE * GROUND_SCALE;
 const groundRows = 2;
 const groundHeight = groundRows * tileSize;
 
-export const GameCanvas = ({ onExit, backgroundIndex = 1 }: GameCanvasProps) => {
+export const GameCanvas = ({ onExit, onGameOver, backgroundIndex = 1 }: GameCanvasProps) => {
   const { width, height } = useWindowDimensions();
 
-  const backgroundImage = useImage(require('../assets/game/backgrounds_tilesheet.png'));
   const tilemapImage = useImage(require('../assets/game/tilemap_packed.png'));
   const characterImage = useImage(
     require('../assets/platform assets/Tilemap/tilemap-characters_packed.png')
@@ -54,42 +62,173 @@ export const GameCanvas = ({ onExit, backgroundIndex = 1 }: GameCanvasProps) => 
   const posY = useSharedValue(0);
   const velocityY = useSharedValue(0);
   const gravityDirection = useSharedValue(1); // 1 = down, -1 = up
-  const scrollOffset = useSharedValue(0);
   const frameIndex = useSharedValue(0);
   const elapsedMs = useSharedValue(0);
+  const gameOver = useSharedValue(0); // 0 = playing, 1 = dead
+  const velocityX = useSharedValue(0); // flip arc horizontal boost
+  const totalScroll = useSharedValue(0); // cumulative world scroll (never wraps)
+  const groundPictureWidthSv = useSharedValue(0);
+  const initialized = useSharedValue(0); // 0 = not yet, 1 = ready
+  const charX = useSharedValue(0);
+
+  const [chunks, setChunks] = useState<Chunk[]>([]);
+  const [score, setScore] = useState(0);
+  const chunksRef = useRef<Chunk[]>([]);
+  chunksRef.current = chunks;
+  const platforms = useMemo(() => chunks.flatMap((c) => c.platforms), [chunks]);
+  const platformRects = useSharedValue<number[]>([]); // [x,y,w,h, ...] for worklet
+
+  const onGameOverRef = useRef(onGameOver);
+  onGameOverRef.current = onGameOver;
+  const triggerGameOver = useCallback((score: number) => {
+    onGameOverRef.current?.(score);
+  }, []);
 
   useEffect(() => {
-    if (height > 0) {
-      groundY.value = height - groundHeight;
-      posY.value = height - groundHeight - CHAR_SIZE * CHAR_SCALE;
+    if (height > 0 && width > 0) {
+      const gY = height - groundHeight;
+      groundY.value = gY;
+      posY.value = gY - CHAR_SIZE * CHAR_SCALE;
+      charX.value = width * 0.25;
+      const initialChunks = preGenerateLevelChunks(width, height, gY, tileSize);
+      setChunks(initialChunks);
+      initialized.value = 1;
     }
-  }, [height]);
+  }, [height, width]);
+
+  // Update platform rects for worklet when platforms change
+  useEffect(() => {
+    const rects = platforms.flatMap((p) => [p.x, p.y, p.width, p.height]);
+    platformRects.value = rects;
+  }, [platforms]);
+
+  // Spawn chunks when totalScroll advances
+  const lastSpawnRef = useRef(0);
+  const spawnChunks = useCallback(() => {
+    const scroll = totalScroll.value;
+    if (scroll < lastSpawnRef.current) return;
+    lastSpawnRef.current = scroll + 200;
+
+    const gY = groundY.value;
+    const currentChunks = chunksRef.current;
+    const newChunks = generateLevelChunks(
+      scroll,
+      width,
+      height,
+      gY,
+      tileSize,
+      currentChunks
+    );
+    if (newChunks.length > currentChunks.length) {
+      setChunks(newChunks);
+    }
+  }, [height, width]);
+
+  const lastSpawnAt = useSharedValue(0);
+  const lastScoreAt = useSharedValue(0);
+  useAnimatedReaction(
+    () => totalScroll.value,
+    (scroll) => {
+      if (scroll - lastSpawnAt.value >= 300) {
+        lastSpawnAt.value = scroll;
+        runOnJS(spawnChunks)();
+      }
+      if (scroll - lastScoreAt.value >= 50) {
+        lastScoreAt.value = scroll;
+        runOnJS(setScore)(Math.floor(scroll));
+      }
+    }
+  );
 
   useFrameCallback((frameInfo) => {
     'worklet';
-    const dt = frameInfo.timeSincePreviousFrame ?? 16;
+    if (gameOver.value === 1) return;
+
+    if (initialized.value === 0) return;
+
     const gY = groundY.value;
+
+    const dt = frameInfo.timeSincePreviousFrame ?? 16;
     const charH = CHAR_SIZE * CHAR_SCALE;
     const gDir = gravityDirection.value;
 
-    scrollOffset.value += RUN_SPEED * (dt / 1000);
-    if (scrollOffset.value >= width) {
-      scrollOffset.value -= width;
-    }
+    totalScroll.value += RUN_SPEED * (dt / 1000);
 
     velocityY.value += gDir * GRAVITY * (dt / 1000);
     posY.value += velocityY.value * (dt / 1000);
 
-    // Bottom ground collision (falling down, gravity = 1)
-    if (gDir === 1 && posY.value + charH >= gY) {
-      posY.value = gY - charH;
-      velocityY.value = 0;
+    const charWorldX = totalScroll.value + charX.value;
+    const rects = platformRects.value;
+    const inFlatZone = charWorldX < FLAT_ZONE_LENGTH;
+
+    // Flat zone: always use ground collision (original behavior - no death)
+    if (inFlatZone) {
+      if (gDir === 1 && posY.value + charH >= gY) {
+        posY.value = gY - charH;
+        velocityY.value = 0;
+      }
+    } else {
+      // Easy+ zone: platform collision + death
+      let lowestSurfaceY = gY;
+      for (let i = 0; i < rects.length; i += 4) {
+        const px = rects[i];
+        const py = rects[i + 1];
+        const pw = rects[i + 2];
+        if (charWorldX >= px && charWorldX <= px + pw && py > lowestSurfaceY) {
+          lowestSurfaceY = py;
+        }
+      }
+
+      const deathThreshold = lowestSurfaceY + charH * DEATH_MARGIN_FRACTION;
+      if (posY.value + charH > deathThreshold) {
+        gameOver.value = 1;
+        runOnJS(triggerGameOver)(Math.floor(totalScroll.value));
+        return;
+      }
+
+      if (gDir === 1 && velocityY.value > 0) {
+        let landed = false;
+        for (let i = 0; i < rects.length; i += 4) {
+          const px = rects[i];
+          const py = rects[i + 1];
+          const pw = rects[i + 2];
+          if (charWorldX >= px && charWorldX <= px + pw && posY.value + charH >= py) {
+            posY.value = py - charH;
+            velocityY.value = 0;
+            landed = true;
+            break;
+          }
+        }
+      }
     }
 
     // Top ground collision (falling up, gravity = -1)
     if (gDir === -1 && posY.value <= groundHeight) {
       posY.value = groundHeight;
       velocityY.value = 0;
+    }
+
+    // Flip arc: apply horizontal boost when in air, zero when grounded
+    let onBottom = gDir === 1 && posY.value >= gY - charH - GROUNDED_EPSILON;
+    if (gDir === 1 && !onBottom) {
+      for (let i = 0; i < rects.length; i += 4) {
+        const px = rects[i];
+        const py = rects[i + 1];
+        const pw = rects[i + 2];
+        if (charWorldX >= px && charWorldX <= px + pw && posY.value >= py - charH - GROUNDED_EPSILON) {
+          onBottom = true;
+          break;
+        }
+      }
+    }
+    const onTop = gDir === -1 && posY.value <= groundHeight + GROUNDED_EPSILON;
+    const grounded = onBottom || onTop;
+    if (grounded) {
+      velocityX.value = 0;
+    } else if (velocityX.value > 0) {
+      totalScroll.value += velocityX.value * (dt / 1000);
+      velocityX.value *= FLIP_ARC_DECAY;
+      if (velocityX.value < 1) velocityX.value = 0;
     }
 
     elapsedMs.value += dt;
@@ -103,32 +242,51 @@ export const GameCanvas = ({ onExit, backgroundIndex = 1 }: GameCanvasProps) => 
     () =>
       Gesture.Tap().onEnd(() => {
         'worklet';
+        if (gameOver.value === 1) return;
+
         const gY = groundY.value;
         const charH = CHAR_SIZE * CHAR_SCALE;
         const gDir = gravityDirection.value;
+        const charWorldX = totalScroll.value + charX.value;
 
-        // Only allow flip when grounded
-        const onBottom = gDir === 1 && posY.value >= gY - charH - GROUNDED_EPSILON;
+        // Only allow flip when grounded (on floor, platform, or ceiling)
+        let onBottom = false;
+        if (gDir === 1) {
+          onBottom = posY.value >= gY - charH - GROUNDED_EPSILON;
+          if (!onBottom) {
+            const rects = platformRects.value;
+            for (let i = 0; i < rects.length; i += 4) {
+              const px = rects[i];
+              const py = rects[i + 1];
+              const pw = rects[i + 2];
+              if (charWorldX >= px && charWorldX <= px + pw) {
+                if (posY.value >= py - charH - GROUNDED_EPSILON) {
+                  onBottom = true;
+                  break;
+                }
+              }
+            }
+          }
+        }
         const onTop = gDir === -1 && posY.value <= groundHeight + GROUNDED_EPSILON;
 
         if (onBottom || onTop) {
-          // Flip gravity direction - character falls to the other ground
           gravityDirection.value = -gDir;
           velocityY.value = 0;
+          velocityX.value = FLIP_ARC_FORWARD;
         }
       }),
     []
   );
 
-  const charX = width * 0.25;
   const characterTransforms = useRSXformBuffer(1, (val) => {
     'worklet';
     const gDir = gravityDirection.value;
+    const cX = charX.value;
     if (gDir === -1) {
-      // On ceiling: flip character vertically (negative scale, offset to keep in place)
-      val.set(-CHAR_SCALE, 0, charX + CHAR_SIZE * CHAR_SCALE, posY.value + CHAR_SIZE * CHAR_SCALE);
+      val.set(-CHAR_SCALE, 0, cX + CHAR_SIZE * CHAR_SCALE, posY.value + CHAR_SIZE * CHAR_SCALE);
     } else {
-      val.set(CHAR_SCALE, 0, charX, posY.value);
+      val.set(CHAR_SCALE, 0, cX, posY.value);
     }
   });
   const characterSprites = useDerivedValue(() => {
@@ -136,59 +294,10 @@ export const GameCanvas = ({ onExit, backgroundIndex = 1 }: GameCanvasProps) => 
     return [rect(frame * CHAR_SIZE, 0, CHAR_SIZE, CHAR_SIZE)];
   });
 
-  const backgroundPicture = useMemo(() => {
-    if (!backgroundImage || width <= 0 || height <= 0) return null;
-    const bgPanelWidth = TILE_WIDTH * TILE_COUNT; // 192px
-    const cols = Math.ceil((2 * width) / bgPanelWidth) + 1;
-    const paint = Skia.Paint();
-    return createPicture((canvas) => {
-      for (let col = 0; col < cols; col++) {
-        const panelIndex = col % TILE_COUNT;
-        const srcRect = Skia.XYWHRect(
-          panelIndex * TILE_WIDTH,
-          0,
-          TILE_WIDTH,
-          TILE_HEIGHT
-        );
-        const dstRect = Skia.XYWHRect(col * bgPanelWidth, 0, bgPanelWidth, height);
-        canvas.drawImageRect(backgroundImage, srcRect, dstRect, paint);
-      }
-    }, Skia.XYWHRect(0, 0, cols * bgPanelWidth, height));
-  }, [backgroundImage, height, width]);
-
-  const groundPicture = useMemo(() => {
-    if (!tilemapImage || width <= 0 || height <= 0) return null;
-    const groundWidth = 2 * width;
-    const cols = Math.ceil(groundWidth / tileSize) + 1;
-    const groundYVal = Math.floor(height - groundHeight);
-    const paint = Skia.Paint();
-    paint.setAntiAlias(false);
-    const getSrcRect = (tileIndex: number) => {
-      const col = tileIndex % TILEMAP_COLS;
-      const row = Math.floor(tileIndex / TILEMAP_COLS);
-      return Skia.XYWHRect(col * TILEMAP_SIZE, row * TILEMAP_SIZE, TILEMAP_SIZE, TILEMAP_SIZE);
-    };
-    const GRASS = { left: 23, center: 22, right: 21 };
-    const DIRT = { left: 123, center: 122, right: 121 };
-    return createPicture((canvas) => {
-      for (let row = 0; row < groundRows; row++) {
-        const isSurface = row === 0;
-        const tiles = isSurface ? GRASS : DIRT;
-        for (let col = 0; col < cols; col++) {
-          const tileIndex = col === 0 ? tiles.left : col === cols - 1 ? tiles.right : tiles.center;
-          const srcRect = getSrcRect(tileIndex);
-          const x = Math.floor(col * tileSize);
-          const y = Math.floor(groundYVal + row * tileSize);
-          const dst = Skia.XYWHRect(x, y, tileSize, tileSize);
-          canvas.drawImageRect(tilemapImage, srcRect, dst, paint);
-        }
-      }
-    }, Skia.XYWHRect(0, 0, groundWidth, height));
-  }, [tilemapImage, height, width]);
-
   const topGroundPicture = useMemo(() => {
     if (!tilemapImage || width <= 0 || height <= 0) return null;
-    const groundWidth = 2 * width;
+    // Wide strip + extra tile to avoid seam at wrap; use integer multiple of tileSize for clean repeat
+    const groundWidth = Math.ceil((3 * width) / tileSize) * tileSize + tileSize;
     const cols = Math.ceil(groundWidth / tileSize) + 1;
     const paint = Skia.Paint();
     paint.setAntiAlias(false);
@@ -221,15 +330,59 @@ export const GameCanvas = ({ onExit, backgroundIndex = 1 }: GameCanvasProps) => 
     }, Skia.XYWHRect(0, 0, groundWidth, groundHeight));
   }, [tilemapImage, width, height]);
 
+  const groundPictureWidth = useMemo(() => {
+    const w = Math.ceil((3 * width) / tileSize) * tileSize + tileSize;
+    return w;
+  }, [width]);
+  useEffect(() => {
+    groundPictureWidthSv.value = groundPictureWidth;
+  }, [groundPictureWidth]);
   const groundTransform = useDerivedValue(() => {
-    return [{ translateX: -scrollOffset.value }];
+    'worklet';
+    const w = groundPictureWidthSv.value || 1;
+    const offset = totalScroll.value % w;
+    return [{ translateX: -offset }];
   });
 
-  const bgPanelWidth = TILE_WIDTH * TILE_COUNT;
-  const backgroundTransform = useDerivedValue(() => {
-    const parallaxOffset = scrollOffset.value * BACKGROUND_PARALLAX;
-    const loopOffset = parallaxOffset % bgPanelWidth;
-    return [{ translateX: -loopOffset }];
+  const platformsPicture = useMemo(() => {
+    if (!tilemapImage || width <= 0 || height <= 0 || platforms.length === 0) return null;
+    const paint = Skia.Paint();
+    paint.setAntiAlias(false);
+    const getSrcRect = (tileIndex: number) => {
+      const col = tileIndex % TILEMAP_COLS;
+      const row = Math.floor(tileIndex / TILEMAP_COLS);
+      return Skia.XYWHRect(col * TILEMAP_SIZE, row * TILEMAP_SIZE, TILEMAP_SIZE, TILEMAP_SIZE);
+    };
+    const GRASS = { left: 23, center: 22, right: 21 };
+    const DIRT = { left: 123, center: 122, right: 121 };
+    const margin = tileSize * 2;
+    const maxX = Math.max(...platforms.map((p) => p.x + p.width), width * 3) + margin;
+    return createPicture(
+      (canvas) => {
+        for (const p of platforms) {
+          const cols = Math.ceil(p.width / tileSize);
+          const rows = Math.ceil(p.height / tileSize);
+          for (let row = 0; row < rows; row++) {
+            const isSurface = row === 0;
+            const tiles = isSurface ? GRASS : DIRT;
+            for (let col = 0; col < cols; col++) {
+              const tileIndex =
+                col === 0 ? tiles.left : col === cols - 1 ? tiles.right : tiles.center;
+              const srcRect = getSrcRect(tileIndex);
+              const x = Math.floor(p.x + col * tileSize);
+              const y = Math.floor(p.y + row * tileSize);
+              const dst = Skia.XYWHRect(x, y, tileSize, tileSize);
+              canvas.drawImageRect(tilemapImage, srcRect, dst, paint);
+            }
+          }
+        }
+      },
+      Skia.XYWHRect(0, 0, maxX, height)
+    );
+  }, [tilemapImage, height, width, platforms]);
+
+  const platformsTransform = useDerivedValue(() => {
+    return [{ translateX: -totalScroll.value }];
   });
 
   useEffect(() => {
@@ -241,23 +394,19 @@ export const GameCanvas = ({ onExit, backgroundIndex = 1 }: GameCanvasProps) => 
 
   return (
     <View style={[styles.container, { width, height }]}>
+      <View style={styles.scoreWrapper}>
+        <Text style={styles.scoreText}>{score}m</Text>
+      </View>
       <GestureDetector gesture={tapGesture}>
         <Canvas style={styles.canvas}>
-          {backgroundPicture ? (
-            <Group transform={backgroundTransform}>
-              <Picture picture={backgroundPicture} />
-            </Group>
-          ) : (
-            <Fill color="#add8e6" />
-          )}
           {topGroundPicture && (
             <Group transform={groundTransform}>
               <Picture picture={topGroundPicture} />
             </Group>
           )}
-          {groundPicture && (
-            <Group transform={groundTransform}>
-              <Picture picture={groundPicture} />
+          {platformsPicture && (
+            <Group transform={platformsTransform}>
+              <Picture picture={platformsPicture} />
             </Group>
           )}
           {characterImage && (
@@ -287,6 +436,21 @@ const styles = StyleSheet.create({
   },
   canvas: {
     flex: 1,
+  },
+  scoreWrapper: {
+    position: 'absolute',
+    left: 24,
+    top: 24,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 24,
+    zIndex: 10,
+  },
+  scoreText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#2b2b2b',
   },
   exitWrapper: {
     position: 'absolute',
