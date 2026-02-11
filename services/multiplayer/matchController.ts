@@ -45,6 +45,14 @@ const initialViewState: MultiplayerViewState = {
 };
 
 const FALLBACK_SERVER_PORT = 4100;
+const DEFAULT_MULTIPLAYER_SERVER_URL =
+  'https://multiplayer-server-production-839e.up.railway.app';
+
+const resolveConfiguredServerUrl = () => {
+  const configuredUrl = process.env.EXPO_PUBLIC_MULTIPLAYER_URL?.trim();
+  if (configuredUrl) return configuredUrl;
+  return DEFAULT_MULTIPLAYER_SERVER_URL || resolveDefaultServerUrl();
+};
 
 const resolveDefaultServerUrl = () => {
   const sourceUrl: string | undefined = NativeModules?.SourceCode?.scriptURL;
@@ -79,7 +87,7 @@ export class MultiplayerMatchController {
   private lastSentState: Omit<MatchStatePacket, 't'> | null = null;
   private countdownTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(serverUrl = process.env.EXPO_PUBLIC_MULTIPLAYER_URL || resolveDefaultServerUrl()) {
+  constructor(serverUrl = resolveConfiguredServerUrl()) {
     this.serverUrl = serverUrl;
     this.socket = createMultiplayerSocket(serverUrl);
     this.clientId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
@@ -170,7 +178,7 @@ export class MultiplayerMatchController {
       const snapshot: OpponentSnapshot = {
         playerId,
         nickname: opponent.nickname,
-        posY: state.posY,
+        normalizedY: state.normalizedY,
         gravityDir: state.gravityDir,
         scroll: state.scroll,
         alive: state.alive,
@@ -343,7 +351,7 @@ export class MultiplayerMatchController {
     const prev = this.lastSentState;
     const smallDelta =
       prev &&
-      Math.abs(prev.posY - payload.posY) < 0.35 &&
+      Math.abs(prev.normalizedY - payload.normalizedY) < 0.004 &&
       Math.abs(prev.scroll - payload.scroll) < 1.25 &&
       prev.gravityDir === payload.gravityDir &&
       prev.alive === payload.alive;

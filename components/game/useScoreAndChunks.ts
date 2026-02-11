@@ -3,13 +3,14 @@ import { useAnimatedReaction, useSharedValue } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 import type { Chunk } from '../../types/game';
 import { generateLevelChunks, preGenerateLevelChunks } from '../../utils/levelGenerator';
-import { CHAR_SCALE, CHAR_SIZE, PLAYER_X_FACTOR, tileSize } from './constants';
+import { CHAR_SCALE, CHAR_SIZE, PLAYER_X_FACTOR, groundHeight, tileSize } from './constants';
 import type { SimulationRefs } from './types';
 
 interface UseScoreAndChunksArgs {
   width: number;
   height: number;
   groundY: number;
+  initialGravityDirection: 1 | -1;
   refs: Pick<
     SimulationRefs,
     | 'groundY'
@@ -31,7 +32,13 @@ interface UseScoreAndChunksArgs {
   >;
 }
 
-export const useScoreAndChunks = ({ width, height, groundY, refs }: UseScoreAndChunksArgs) => {
+export const useScoreAndChunks = ({
+  width,
+  height,
+  groundY,
+  initialGravityDirection,
+  refs,
+}: UseScoreAndChunksArgs) => {
   const [chunks, setChunks] = useState<Chunk[]>([]);
   const [score, setScore] = useState(0);
   const chunksRef = useRef<Chunk[]>([]);
@@ -45,10 +52,13 @@ export const useScoreAndChunks = ({ width, height, groundY, refs }: UseScoreAndC
   useEffect(() => {
     if (height <= 0 || width <= 0) return;
 
+    const spawnGravity = initialGravityDirection === -1 ? -1 : 1;
+    const charH = CHAR_SIZE * CHAR_SCALE;
+
     refs.groundY.value = groundY;
-    refs.posY.value = groundY - CHAR_SIZE * CHAR_SCALE;
+    refs.posY.value = spawnGravity === -1 ? groundHeight : groundY - charH;
     refs.velocityY.value = 0;
-    refs.gravityDirection.value = 1;
+    refs.gravityDirection.value = spawnGravity;
     refs.velocityX.value = 0;
     refs.totalScroll.value = 0;
     refs.gameOver.value = 0;
@@ -67,7 +77,7 @@ export const useScoreAndChunks = ({ width, height, groundY, refs }: UseScoreAndC
     const initialChunks = preGenerateLevelChunks(width, height, groundY, tileSize);
     setChunks(initialChunks);
     setScore(0);
-  }, [groundY, height, lastScoreAt, lastSpawnAt, refs, width]);
+  }, [groundY, height, initialGravityDirection, lastScoreAt, lastSpawnAt, refs, width]);
 
   useEffect(() => {
     const rects: number[] = [];

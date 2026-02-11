@@ -25,7 +25,7 @@ export type MatchStatus = 'idle' | 'lobby' | 'countdown' | 'running' | 'result';
 export interface OpponentSnapshot {
   playerId: string;
   nickname: string;
-  posY: number;
+  normalizedY: number;
   gravityDir: 1 | -1;
   scroll: number;
   alive: boolean;

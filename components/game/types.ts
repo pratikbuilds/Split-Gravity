@@ -12,12 +12,14 @@ export type GameCanvasProps = {
   onGameOver?: (result: GameResult) => void;
   onAudioEvent?: (event: GameAudioEvent) => void;
   backgroundIndex?: number;
+  initialGravityDirection?: 1 | -1;
+  opponentInitialGravityDirection?: 1 | -1;
   opponentSnapshot?: OpponentSnapshot | null;
   opponentConnectionState?: 'connected' | 'reconnecting' | 'forfeit_pending';
   opponentName?: string;
   onFlipInput?: () => void;
   onLocalState?: (payload: {
-    posY: number;
+    normalizedY: number;
     gravityDir: 1 | -1;
     scroll: number;
     alive: boolean;

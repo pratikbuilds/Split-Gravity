@@ -5,7 +5,7 @@ import { GestureDetector } from 'react-native-gesture-handler';
 import { useSharedValue } from 'react-native-reanimated';
 import { Atlas, Canvas, Group, Picture } from '@shopify/react-native-skia';
 import type { GameAudioEvent } from '../types/game';
-import { groundHeight, ENABLE_COLLIDER_DEBUG_UI } from './game/constants';
+import { CHAR_SCALE, CHAR_SIZE, ENABLE_COLLIDER_DEBUG_UI, groundHeight } from './game/constants';
 import { useGameGestures } from './game/useGameGestures';
 import { useGameSimulation } from './game/useGameSimulation';
 import { useScoreAndChunks } from './game/useScoreAndChunks';
@@ -17,6 +17,8 @@ export const GameCanvas = ({
   onGameOver,
   onAudioEvent,
   backgroundIndex = 0,
+  initialGravityDirection = 1,
+  opponentInitialGravityDirection,
   opponentSnapshot,
   opponentConnectionState = 'connected',
   opponentName,
@@ -109,6 +111,7 @@ export const GameCanvas = ({
     width,
     height,
     groundY: stableGroundY,
+    initialGravityDirection,
     refs,
   });
 
@@ -151,15 +154,31 @@ export const GameCanvas = ({
   }, []);
 
   useEffect(() => {
+    const charH = CHAR_SIZE * CHAR_SCALE;
+    const opponentSpawnGravity =
+      opponentInitialGravityDirection ?? (initialGravityDirection === 1 ? -1 : 1);
+    opponentGravity.value = opponentSpawnGravity;
+    opponentPosY.value = opponentSpawnGravity === -1 ? groundHeight : stableGroundY - charH;
+  }, [
+    initialGravityDirection,
+    opponentGravity,
+    opponentInitialGravityDirection,
+    opponentPosY,
+    stableGroundY,
+  ]);
+
+  useEffect(() => {
     if (!opponentSnapshot) {
       opponentAlive.value = 0;
       return;
     }
 
-    opponentPosY.value = opponentSnapshot.posY;
+    const charH = CHAR_SIZE * CHAR_SCALE;
+    const laneSpan = Math.max(1, height - 2 * groundHeight - charH);
+    opponentPosY.value = groundHeight + opponentSnapshot.normalizedY * laneSpan;
     opponentGravity.value = opponentSnapshot.gravityDir;
     opponentAlive.value = opponentSnapshot.alive ? 1 : 0;
-  }, [opponentAlive, opponentGravity, opponentPosY, opponentSnapshot]);
+  }, [height, opponentAlive, opponentGravity, opponentPosY, opponentSnapshot]);
 
   return (
     <View style={[styles.container, { width, height }]}>

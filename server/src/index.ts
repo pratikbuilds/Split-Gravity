@@ -480,7 +480,7 @@ io.on('connection', (socket) => {
         playerId: player.playerId,
         t: payload.t,
         scroll: payload.scroll,
-        posY: payload.posY,
+        normalizedY: payload.normalizedY,
         alive: payload.alive,
       });
     }

@@ -23,7 +23,7 @@ export interface RoomSnapshot {
 
 export interface MatchStatePacket {
   t: number;
-  posY: number;
+  normalizedY: number;
   gravityDir: 1 | -1;
   scroll: number;
   alive: boolean;

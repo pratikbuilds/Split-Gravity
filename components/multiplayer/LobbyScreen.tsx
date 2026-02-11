@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import type { MultiplayerViewState } from '../../services/multiplayer/matchController';
 import { ModeSelect } from './ModeSelect';
 import { RoomCodeInput } from './RoomCodeInput';
@@ -22,6 +23,10 @@ export const LobbyScreen = ({
   const [nickname, setNickname] = useState('');
   const [roomCodeInput, setRoomCodeInput] = useState('');
   const [step, setStep] = useState<'mode' | 'join'>('mode');
+
+  useEffect(() => {
+    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+  }, []);
 
   const normalizedCode = useMemo(() => roomCodeInput.toUpperCase().trim(), [roomCodeInput]);
   const canReady =

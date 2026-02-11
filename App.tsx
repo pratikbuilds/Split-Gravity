@@ -40,6 +40,15 @@ export default function App() {
   const [multiplayerState, setMultiplayerState] = useState<MultiplayerViewState>(
     multiplayerController.getState()
   );
+  const localPlayerId = multiplayerState.localPlayer?.playerId ?? null;
+  const opponentPlayerId = multiplayerState.opponent?.playerId ?? null;
+  const hasMultiplayerPair = Boolean(localPlayerId && opponentPlayerId);
+  const localStartsBottom =
+    mode !== 'multi' || !localPlayerId || !opponentPlayerId
+      ? true
+      : localPlayerId.localeCompare(opponentPlayerId) <= 0;
+  const localInitialGravityDirection: 1 | -1 = localStartsBottom ? 1 : -1;
+  const opponentInitialGravityDirection: 1 | -1 = localStartsBottom ? -1 : 1;
 
   const isMutedRef = useRef(isMuted);
   isMutedRef.current = isMuted;
@@ -74,6 +83,7 @@ export default function App() {
   useEffect(() => {
     if (mode !== 'multi') return;
     if (multiplayerState.matchStatus !== 'running') return;
+    if (!hasMultiplayerPair) return;
 
     triggerSound('run_start');
     setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
@@ -82,7 +92,7 @@ export default function App() {
     setLastResult(null);
     setGameKey((k) => k + 1);
     setScreen('game');
-  }, [mode, multiplayerState.matchStatus, triggerSound]);
+  }, [hasMultiplayerPair, mode, multiplayerState.matchStatus, triggerSound]);
 
   useEffect(() => {
     let mounted = true;
@@ -185,7 +195,7 @@ export default function App() {
 
   const handleLocalState = useCallback(
     (payload: {
-      posY: number;
+      normalizedY: number;
       gravityDir: 1 | -1;
       scroll: number;
       alive: boolean;
@@ -205,7 +215,6 @@ export default function App() {
   );
 
   const multiplayerResult: MultiplayerResult | null = multiplayerState.multiplayerResult;
-  const localPlayerId = multiplayerState.localPlayer?.playerId;
   const didWin =
     multiplayerResult && localPlayerId ? multiplayerResult.winnerPlayerId === localPlayerId : false;
 
@@ -233,6 +242,8 @@ export default function App() {
             onGameOver={handleSinglePlayerGameOver}
             onAudioEvent={triggerSound}
             backgroundIndex={backgroundIndex}
+            initialGravityDirection={localInitialGravityDirection}
+            opponentInitialGravityDirection={opponentInitialGravityDirection}
             opponentSnapshot={mode === 'multi' ? multiplayerState.opponentSnapshot : null}
             opponentName={mode === 'multi' ? multiplayerState.opponent?.nickname : undefined}
             opponentConnectionState={

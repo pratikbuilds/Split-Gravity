@@ -112,7 +112,7 @@ interface UseGameSimulationArgs {
   triggerAudioEvent: (event: 'game_over') => void;
   triggerGameOver: (score: number) => void;
   onLocalState?: (payload: {
-    posY: number;
+    normalizedY: number;
     gravityDir: 1 | -1;
     scroll: number;
     alive: boolean;
@@ -287,8 +287,10 @@ export const useGameSimulation = ({
     }
 
     if (onLocalState && refs.frameIndex.value % 2 === 0) {
+      const laneSpan = Math.max(1, height - 2 * groundHeight - charH);
+      const normalizedY = (refs.posY.value - groundHeight) / laneSpan;
       scheduleOnRN(onLocalState, {
-        posY: refs.posY.value,
+        normalizedY,
         gravityDir: refs.gravityDirection.value === -1 ? -1 : 1,
         scroll: refs.totalScroll.value,
         alive: refs.dying.value === 0 && refs.gameOver.value === 0,
