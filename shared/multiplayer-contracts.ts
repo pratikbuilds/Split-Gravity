@@ -1,0 +1,104 @@
+export type MatchState = 'ROOM_OPEN' | 'ROOM_FULL' | 'READY' | 'COUNTDOWN' | 'RUNNING' | 'ENDED';
+
+export type ConnectionState = 'connected' | 'reconnecting' | 'forfeit_pending';
+
+export interface PlayerSession {
+  playerId: string;
+  clientId: string;
+  nickname: string;
+  alive: boolean;
+  connected: boolean;
+}
+
+export interface MatchConfig {
+  reconnectGraceMs: number;
+}
+
+export interface RoomSnapshot {
+  roomCode: string;
+  state: MatchState;
+  players: PlayerSession[];
+  readyPlayerIds: string[];
+}
+
+export interface MatchStatePacket {
+  t: number;
+  posY: number;
+  gravityDir: 1 | -1;
+  scroll: number;
+  alive: boolean;
+  score: number;
+}
+
+export type MatchResultReason = 'death' | 'disconnect_forfeit' | 'opponent_disconnect_forfeit';
+
+export interface MatchResult {
+  winnerPlayerId: string;
+  loserPlayerId: string;
+  reason: MatchResultReason;
+  endedAt: number;
+}
+
+export interface RoomCreatePayload {
+  nickname: string;
+  clientId: string;
+}
+
+export interface RoomJoinPayload {
+  roomCode: string;
+  nickname: string;
+  clientId: string;
+}
+
+export interface RoomReadyPayload {
+  roomCode: string;
+}
+
+export interface MatchInputPayload {
+  t: number;
+  inputType: 'flip';
+}
+
+export interface MatchDeathPayload {
+  t: number;
+  score: number;
+}
+
+export interface HeartbeatPayload {
+  t: number;
+}
+
+export interface ReconnectWindowPayload {
+  playerId: string;
+  secondsRemaining: number;
+}
+
+export interface ErrorPayload {
+  code: string;
+  message: string;
+}
+
+export interface ClientToServerEvents {
+  'room:create': (payload: RoomCreatePayload) => void;
+  'room:join': (payload: RoomJoinPayload) => void;
+  'room:ready': (payload: RoomReadyPayload) => void;
+  'match:input': (payload: MatchInputPayload) => void;
+  'match:state': (payload: MatchStatePacket) => void;
+  'match:death': (payload: MatchDeathPayload) => void;
+  'session:heartbeat': (payload: HeartbeatPayload) => void;
+}
+
+export interface ServerToClientEvents {
+  'room:created': (payload: { roomCode: string; player: PlayerSession }) => void;
+  'room:state': (payload: RoomSnapshot) => void;
+  'match:start': (payload: {
+    roomCode: string;
+    seed: number;
+    startAt: number;
+    config: MatchConfig;
+  }) => void;
+  'match:opponentState': (payload: { playerId: string; state: MatchStatePacket }) => void;
+  'match:result': (payload: MatchResult) => void;
+  'session:reconnectWindow': (payload: ReconnectWindowPayload) => void;
+  error: (payload: ErrorPayload) => void;
+}

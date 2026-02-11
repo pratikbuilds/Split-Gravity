@@ -18,6 +18,33 @@ export interface GameResult {
   playerScore: number;
 }
 
+export type GameMode = 'single' | 'multi';
+
+export type MatchStatus = 'idle' | 'lobby' | 'countdown' | 'running' | 'result';
+
+export interface OpponentSnapshot {
+  playerId: string;
+  nickname: string;
+  posY: number;
+  gravityDir: 1 | -1;
+  scroll: number;
+  alive: boolean;
+  score: number;
+  t: number;
+}
+
+export type MultiplayerResultReason =
+  | 'death'
+  | 'disconnect_forfeit'
+  | 'opponent_disconnect_forfeit';
+
+export interface MultiplayerResult {
+  winnerPlayerId: string;
+  loserPlayerId: string;
+  reason: MultiplayerResultReason;
+  endedAt: number;
+}
+
 export type GameAudioEvent = 'flip' | 'game_over' | 'run_start' | 'land' | 'near_miss';
 
 // Reachability constants (tune from physics)

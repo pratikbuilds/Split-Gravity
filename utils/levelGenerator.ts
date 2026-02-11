@@ -19,13 +19,15 @@ type MidStepPattern = {
   lane: 0 | 1 | 2;
 };
 
-let chunkId = 0;
-
 const CHUNK_LENGTH_TILES: Record<Exclude<Difficulty, 'flat'>, number> = {
   easy: 18,
   medium: 20,
   hard: 22,
 };
+
+function chunkIdFor(startX: number, difficulty: Difficulty): string {
+  return `chunk_${difficulty}_${Math.round(startX)}`;
+}
 
 // Deterministic handcrafted patterns (no random generation).
 // Pattern alternates long/short ledges so they look like side extensions.
@@ -85,6 +87,7 @@ function createPlatform(
 }
 
 function getChunkEndX(chunk: Chunk): number {
+  if (chunk.platforms.length === 0) return 0;
   return Math.max(...chunk.platforms.map((p) => p.x + p.width));
 }
 
@@ -198,6 +201,15 @@ function ensureSharedCoverage(
       voidStart = null;
     }
   }
+
+  if (voidStart != null) {
+    const voidWidth = endX - voidStart;
+    if (voidWidth > maxSharedVoid) {
+      const bridgeWidth = Math.max(MIN_LANDING_WIDTH, tileSize * 4);
+      const bridgeX = voidStart + (voidWidth - bridgeWidth) * 0.5;
+      platforms.push(createPlatform(bridgeX, groundY, bridgeWidth, tileSize * 2, 'bottom'));
+    }
+  }
 }
 
 function generateChunk(
@@ -214,7 +226,7 @@ function generateChunk(
     platforms.push(createPlatform(startX, groundY, width, platformHeight, 'bottom'));
     platforms.push(createPlatform(startX, 0, width, platformHeight, 'top'));
     return {
-      id: `chunk_${chunkId++}`,
+      id: chunkIdFor(startX, difficulty),
       width,
       platforms,
       difficulty: 'flat',
@@ -260,7 +272,7 @@ function generateChunk(
   ensureSharedCoverage(platforms, startX, endX, groundY, tileSize);
 
   return {
-    id: `chunk_${chunkId++}`,
+    id: chunkIdFor(startX, difficulty),
     width: chunkLength,
     platforms,
     difficulty,
@@ -282,17 +294,30 @@ export function generateLevelChunks(
   _screenHeight: number,
   groundY: number,
   tileSize: number,
-  existingChunks: Chunk[]
+  existingChunks: Chunk[],
+  options?: {
+    disableTrim?: boolean;
+  }
 ): Chunk[] {
   const chunks = [...existingChunks];
-  const lastChunk = chunks[chunks.length - 1];
-  const nextSpawnX = lastChunk ? getChunkEndX(lastChunk) : 0;
-
   const spawnThreshold = totalScroll + screenWidth * 2;
-  if (nextSpawnX < spawnThreshold) {
+  const maxChunkAddsPerTick = 6;
+  let iterations = 0;
+
+  while (iterations < maxChunkAddsPerTick) {
+    const lastChunk = chunks[chunks.length - 1];
+    const nextSpawnX = lastChunk ? getChunkEndX(lastChunk) : 0;
+    if (nextSpawnX >= spawnThreshold) break;
+
     const difficulty = getDifficultyForScroll(nextSpawnX);
     const chunk = generateChunk(nextSpawnX, difficulty, groundY, tileSize);
-    if (chunk) chunks.push(chunk);
+    if (!chunk) break;
+    chunks.push(chunk);
+    iterations += 1;
+  }
+
+  if (options?.disableTrim) {
+    return chunks;
   }
 
   const trimX = totalScroll - screenWidth * 2;
@@ -320,10 +345,11 @@ export function preGenerateLevelChunks(
       screenHeight,
       groundY,
       tileSize,
-      chunks
+      chunks,
+      { disableTrim: true }
     );
     if (next.length === chunks.length) break;
-    chunks = [...chunks, next[next.length - 1]];
+    chunks = next;
   }
   return chunks;
 }

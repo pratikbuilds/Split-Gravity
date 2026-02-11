@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { GameCanvas } from 'components/GameCanvas';
 import { HomeScreen } from 'components/HomeScreen';
+import { LobbyScreen } from 'components/multiplayer/LobbyScreen';
 import { getRandomBackgroundIndex } from './utils/backgrounds';
-import type { GameAudioEvent, GameResult } from './types/game';
+import type { GameAudioEvent, GameMode, GameResult, MultiplayerResult } from './types/game';
 import {
   configureAudioMode,
   loadSounds,
@@ -13,20 +14,75 @@ import {
   playSound,
   unloadSounds,
 } from './utils/audio';
+import {
+  MultiplayerMatchController,
+  type MultiplayerViewState,
+} from './services/multiplayer/matchController';
 
 import './global.css';
 
 export default function App() {
-  const [screen, setScreen] = useState<'home' | 'game'>('home');
+  const [screen, setScreen] = useState<'home' | 'lobby' | 'game'>('home');
+  const [mode, setMode] = useState<GameMode>('single');
   const [gameKey, setGameKey] = useState(0);
   const [lastResult, setLastResult] = useState<GameResult | null>(null);
   const [gameOver, setGameOver] = useState(false);
   const [backgroundIndex, setBackgroundIndex] = useState(() => getRandomBackgroundIndex());
   const [isMuted, setIsMuted] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
+  const [localMultiplayerDeathScore, setLocalMultiplayerDeathScore] = useState<number | null>(null);
+
+  const multiplayerControllerRef = useRef<MultiplayerMatchController | null>(null);
+  if (!multiplayerControllerRef.current) {
+    multiplayerControllerRef.current = new MultiplayerMatchController();
+  }
+  const multiplayerController = multiplayerControllerRef.current;
+  const [multiplayerState, setMultiplayerState] = useState<MultiplayerViewState>(
+    multiplayerController.getState()
+  );
+
   const isMutedRef = useRef(isMuted);
   isMutedRef.current = isMuted;
   const soundsRef = useRef<Awaited<ReturnType<typeof loadSounds>> | null>(null);
+
+  const triggerSound = useCallback(
+    (event: GameAudioEvent) => {
+      const loadedSounds = soundsRef.current;
+      if (!loadedSounds || !audioReady) return;
+      const soundKey = mapGameEventToSound(event);
+      void playSound(loadedSounds, soundKey, isMutedRef.current);
+    },
+    [audioReady]
+  );
+
+  useEffect(() => {
+    const unsubscribe = multiplayerController.subscribe((state) => {
+      setMultiplayerState(state);
+    });
+
+    const heartbeat = setInterval(() => {
+      multiplayerController.sendHeartbeat();
+    }, 3000);
+
+    return () => {
+      clearInterval(heartbeat);
+      unsubscribe();
+      multiplayerController.disconnect();
+    };
+  }, [multiplayerController]);
+
+  useEffect(() => {
+    if (mode !== 'multi') return;
+    if (multiplayerState.matchStatus !== 'running') return;
+
+    triggerSound('run_start');
+    setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
+    setLocalMultiplayerDeathScore(null);
+    setGameOver(false);
+    setLastResult(null);
+    setGameKey((k) => k + 1);
+    setScreen('game');
+  }, [mode, multiplayerState.matchStatus, triggerSound]);
 
   useEffect(() => {
     let mounted = true;
@@ -56,24 +112,21 @@ export default function App() {
     };
   }, []);
 
-  const triggerSound = (event: GameAudioEvent) => {
-    const loadedSounds = soundsRef.current;
-    if (!loadedSounds || !audioReady) return;
-    const soundKey = mapGameEventToSound(event);
-    void playSound(loadedSounds, soundKey, isMutedRef.current);
-  };
-
-  const handleGameOver = (result: GameResult) => {
+  const handleSinglePlayerGameOver = (result: GameResult) => {
+    if (mode !== 'single') return;
     setLastResult(result);
     setGameOver(true);
   };
+
   const handleRestart = () => {
     triggerSound('run_start');
     setGameOver(false);
     setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
     setGameKey((k) => k + 1);
   };
-  const handlePlay = () => {
+
+  const handleSinglePlay = () => {
+    setMode('single');
     triggerSound('run_start');
     setGameOver(false);
     setLastResult(null);
@@ -81,30 +134,116 @@ export default function App() {
     setGameKey((k) => k + 1);
     setScreen('game');
   };
+
+  const handleMultiplay = () => {
+    setMode('multi');
+    setGameOver(false);
+    setLastResult(null);
+    setLocalMultiplayerDeathScore(null);
+    multiplayerController.resetLobbyState();
+    setScreen('lobby');
+  };
+
   const handleExitToHome = () => {
     triggerSound('land');
     setGameOver(false);
     setLastResult(null);
+    setLocalMultiplayerDeathScore(null);
+    if (mode === 'multi') {
+      multiplayerController.disconnect();
+      multiplayerController.resetLobbyState();
+      setMode('single');
+    }
     setScreen('home');
   };
+
   const handleToggleMute = () => {
     setIsMuted((prev) => !prev);
   };
 
+  const handleCreateRoom = useCallback(
+    (nickname: string) => {
+      multiplayerController.createRoom(nickname);
+    },
+    [multiplayerController]
+  );
+
+  const handleJoinRoom = useCallback(
+    (roomCode: string, nickname: string) => {
+      multiplayerController.joinRoom(roomCode, nickname);
+    },
+    [multiplayerController]
+  );
+
+  const handleReadyRoom = useCallback(() => {
+    multiplayerController.readyUp();
+  }, [multiplayerController]);
+
+  const handleFlipInput = useCallback(() => {
+    multiplayerController.sendInput('flip');
+  }, [multiplayerController]);
+
+  const handleLocalState = useCallback(
+    (payload: {
+      posY: number;
+      gravityDir: 1 | -1;
+      scroll: number;
+      alive: boolean;
+      score: number;
+    }) => {
+      multiplayerController.sendState(payload);
+    },
+    [multiplayerController]
+  );
+
+  const handleLocalDeath = useCallback(
+    (score: number) => {
+      setLocalMultiplayerDeathScore(score);
+      multiplayerController.reportDeath(score);
+    },
+    [multiplayerController]
+  );
+
+  const multiplayerResult: MultiplayerResult | null = multiplayerState.multiplayerResult;
+  const localPlayerId = multiplayerState.localPlayer?.playerId;
+  const didWin =
+    multiplayerResult && localPlayerId ? multiplayerResult.winnerPlayerId === localPlayerId : false;
+
   return (
     <GestureHandlerRootView style={styles.root}>
       {screen === 'home' ? (
-        <HomeScreen onPlay={handlePlay} />
-      ) : (
+        <HomeScreen onSinglePlay={handleSinglePlay} onMultiplay={handleMultiplay} />
+      ) : null}
+
+      {screen === 'lobby' ? (
+        <LobbyScreen
+          state={multiplayerState}
+          onBack={handleExitToHome}
+          onCreateRoom={handleCreateRoom}
+          onJoinRoom={handleJoinRoom}
+          onReady={handleReadyRoom}
+        />
+      ) : null}
+
+      {screen === 'game' ? (
         <>
           <GameCanvas
             key={gameKey}
             onExit={handleExitToHome}
-            onGameOver={handleGameOver}
+            onGameOver={handleSinglePlayerGameOver}
             onAudioEvent={triggerSound}
             backgroundIndex={backgroundIndex}
+            opponentSnapshot={mode === 'multi' ? multiplayerState.opponentSnapshot : null}
+            opponentName={mode === 'multi' ? multiplayerState.opponent?.nickname : undefined}
+            opponentConnectionState={
+              mode === 'multi' ? multiplayerState.connectionState : 'connected'
+            }
+            onFlipInput={mode === 'multi' ? handleFlipInput : undefined}
+            onLocalState={mode === 'multi' ? handleLocalState : undefined}
+            onLocalDeath={mode === 'multi' ? handleLocalDeath : undefined}
           />
-          {gameOver && (
+
+          {mode === 'single' && gameOver && (
             <View style={styles.gameOverOverlay}>
               <View style={styles.gameOverBackdrop} />
               <View style={styles.gameOverModal}>
@@ -122,13 +261,64 @@ export default function App() {
               </View>
             </View>
           )}
+
+          {mode === 'multi' && (
+            <>
+              {localMultiplayerDeathScore !== null && !multiplayerResult && (
+                <View style={styles.statusChipWrap}>
+                  <View style={styles.statusChip}>
+                    <Text style={styles.statusChipText}>
+                      You are down. Waiting for server result…
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {multiplayerState.connectionState === 'forfeit_pending' &&
+                multiplayerState.reconnectSecondsRemaining !== null && (
+                  <View style={styles.statusChipWrap}>
+                    <View style={styles.warningChip}>
+                      <Text style={styles.statusChipText}>
+                        Reconnect in {multiplayerState.reconnectSecondsRemaining}s or forfeit
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+              {multiplayerResult && (
+                <View style={styles.gameOverOverlay}>
+                  <View style={styles.gameOverBackdrop} />
+                  <View style={styles.gameOverModal}>
+                    <Text style={styles.gameOverTitle}>{didWin ? 'You Win' : 'You Lose'}</Text>
+                    <Text style={styles.gameOverSubtitle}>Reason: {multiplayerResult.reason}</Text>
+                    <View style={styles.gameOverButtons}>
+                      <Pressable
+                        style={styles.restartButton}
+                        onPress={() => {
+                          multiplayerController.resetLobbyState();
+                          setLocalMultiplayerDeathScore(null);
+                          setScreen('lobby');
+                        }}>
+                        <Text style={styles.buttonText}>Lobby</Text>
+                      </Pressable>
+                      <Pressable style={styles.exitButton} onPress={handleExitToHome}>
+                        <Text style={styles.buttonText}>Exit</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
+              )}
+            </>
+          )}
         </>
-      )}
+      ) : null}
+
       <View style={styles.audioControlWrapper}>
         <Pressable style={styles.audioToggleButton} onPress={handleToggleMute}>
           <Text style={styles.audioToggleText}>{isMuted ? 'SOUND OFF' : 'SOUND ON'}</Text>
         </Pressable>
       </View>
+
       <StatusBar style="auto" />
     </GestureHandlerRootView>
   );
@@ -190,6 +380,29 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#ffffff',
+  },
+  statusChipWrap: {
+    position: 'absolute',
+    top: 96,
+    alignSelf: 'center',
+    zIndex: 25,
+  },
+  statusChip: {
+    borderRadius: 999,
+    backgroundColor: 'rgba(15,23,42,0.9)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  warningChip: {
+    borderRadius: 999,
+    backgroundColor: 'rgba(127,29,29,0.92)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  statusChipText: {
+    color: '#f1f5f9',
+    fontWeight: '700',
+    fontSize: 12,
   },
   audioControlWrapper: {
     position: 'absolute',
