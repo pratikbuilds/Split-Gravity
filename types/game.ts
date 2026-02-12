@@ -18,7 +18,7 @@ export interface GameResult {
   playerScore: number;
 }
 
-export type GameMode = 'single' | 'multi';
+export type GameMode = 'single' | 'multi' | 'vs_bot';
 
 export type MatchStatus = 'idle' | 'lobby' | 'countdown' | 'running' | 'result';
 

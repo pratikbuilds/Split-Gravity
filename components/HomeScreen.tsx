@@ -5,9 +5,10 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 type HomeScreenProps = {
   onSinglePlay: () => void;
   onMultiplay: () => void;
+  onVsBotPlay: () => void;
 };
 
-export const HomeScreen = ({ onSinglePlay, onMultiplay }: HomeScreenProps) => {
+export const HomeScreen = ({ onSinglePlay, onMultiplay, onVsBotPlay }: HomeScreenProps) => {
   useEffect(() => {
     void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
   }, []);
@@ -26,6 +27,12 @@ export const HomeScreen = ({ onSinglePlay, onMultiplay }: HomeScreenProps) => {
           onPress={onMultiplay}
           className="rounded-full border border-white px-12 py-4 active:opacity-80">
           <Text className="text-center text-xl font-bold text-white">Multiplay</Text>
+        </Pressable>
+
+        <Pressable
+          onPress={onVsBotPlay}
+          className="rounded-full border border-white px-12 py-4 active:opacity-80">
+          <Text className="text-center text-xl font-bold text-white">Vs Bot</Text>
         </Pressable>
       </View>
     </View>

@@ -46,7 +46,7 @@ const initialViewState: MultiplayerViewState = {
 
 const FALLBACK_SERVER_PORT = 4100;
 const DEFAULT_MULTIPLAYER_SERVER_URL =
-  'https://multiplayer-server-production-839e.up.railway.app';
+  'https://gravity-jump-production.up.railway.app';
 
 const resolveConfiguredServerUrl = () => {
   const configuredUrl = process.env.EXPO_PUBLIC_MULTIPLAYER_URL?.trim();

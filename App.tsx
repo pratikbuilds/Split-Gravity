@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { GameCanvas } from 'components/GameCanvas';
 import { HomeScreen } from 'components/HomeScreen';
 import { LobbyScreen } from 'components/multiplayer/LobbyScreen';
@@ -18,6 +18,7 @@ import {
   MultiplayerMatchController,
   type MultiplayerViewState,
 } from './services/multiplayer/matchController';
+import { useBotOpponent } from './hooks/useBotOpponent';
 
 import './global.css';
 
@@ -31,6 +32,21 @@ export default function App() {
   const [isMuted, setIsMuted] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
   const [localMultiplayerDeathScore, setLocalMultiplayerDeathScore] = useState<number | null>(null);
+  const [vsBotGameOver, setVsBotGameOver] = useState(false);
+  const [vsBotWinner, setVsBotWinner] = useState<'human' | 'bot' | null>(null);
+
+  const { width, height } = useWindowDimensions();
+  const botActive = screen === 'game' && mode === 'vs_bot';
+  const { snapshot: botSnapshot, reset: resetBot } = useBotOpponent({
+    width,
+    height,
+    initialGravityDirection: -1,
+    active: botActive,
+    onBotDeath: useCallback((score: number) => {
+      setVsBotGameOver(true);
+      setVsBotWinner('human');
+    }, []),
+  });
 
   const multiplayerControllerRef = useRef<MultiplayerMatchController | null>(null);
   if (!multiplayerControllerRef.current) {
@@ -44,7 +60,10 @@ export default function App() {
   const opponentPlayerId = multiplayerState.opponent?.playerId ?? null;
   const hasMultiplayerPair = Boolean(localPlayerId && opponentPlayerId);
   const localStartsBottom =
-    mode !== 'multi' || !localPlayerId || !opponentPlayerId
+    mode === 'vs_bot' ||
+    mode !== 'multi' ||
+    !localPlayerId ||
+    !opponentPlayerId
       ? true
       : localPlayerId.localeCompare(opponentPlayerId) <= 0;
   const localInitialGravityDirection: 1 | -1 = localStartsBottom ? 1 : -1;
@@ -123,9 +142,15 @@ export default function App() {
   }, []);
 
   const handleSinglePlayerGameOver = (result: GameResult) => {
-    if (mode !== 'single') return;
-    setLastResult(result);
-    setGameOver(true);
+    if (mode === 'single') {
+      setLastResult(result);
+      setGameOver(true);
+      return;
+    }
+    if (mode === 'vs_bot') {
+      setVsBotGameOver(true);
+      setVsBotWinner('bot');
+    }
   };
 
   const handleRestart = () => {
@@ -145,6 +170,18 @@ export default function App() {
     setScreen('game');
   };
 
+  const handleVsBotPlay = () => {
+    setMode('vs_bot');
+    triggerSound('run_start');
+    setGameOver(false);
+    setLastResult(null);
+    setVsBotGameOver(false);
+    setVsBotWinner(null);
+    setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
+    setGameKey((k) => k + 1);
+    setScreen('game');
+  };
+
   const handleMultiplay = () => {
     setMode('multi');
     setGameOver(false);
@@ -159,6 +196,8 @@ export default function App() {
     setGameOver(false);
     setLastResult(null);
     setLocalMultiplayerDeathScore(null);
+    setVsBotGameOver(false);
+    setVsBotWinner(null);
     if (mode === 'multi') {
       multiplayerController.disconnect();
       multiplayerController.resetLobbyState();
@@ -221,7 +260,11 @@ export default function App() {
   return (
     <GestureHandlerRootView style={styles.root}>
       {screen === 'home' ? (
-        <HomeScreen onSinglePlay={handleSinglePlay} onMultiplay={handleMultiplay} />
+        <HomeScreen
+          onSinglePlay={handleSinglePlay}
+          onMultiplay={handleMultiplay}
+          onVsBotPlay={handleVsBotPlay}
+        />
       ) : null}
 
       {screen === 'lobby' ? (
@@ -244,8 +287,20 @@ export default function App() {
             backgroundIndex={backgroundIndex}
             initialGravityDirection={localInitialGravityDirection}
             opponentInitialGravityDirection={opponentInitialGravityDirection}
-            opponentSnapshot={mode === 'multi' ? multiplayerState.opponentSnapshot : null}
-            opponentName={mode === 'multi' ? multiplayerState.opponent?.nickname : undefined}
+            opponentSnapshot={
+              mode === 'multi'
+                ? multiplayerState.opponentSnapshot
+                : mode === 'vs_bot'
+                  ? botSnapshot
+                  : null
+            }
+            opponentName={
+              mode === 'multi'
+                ? multiplayerState.opponent?.nickname
+                : mode === 'vs_bot'
+                  ? 'Bot'
+                  : undefined
+            }
             opponentConnectionState={
               mode === 'multi' ? multiplayerState.connectionState : 'connected'
             }
@@ -320,6 +375,33 @@ export default function App() {
                 </View>
               )}
             </>
+          )}
+
+          {mode === 'vs_bot' && vsBotGameOver && vsBotWinner && (
+            <View style={styles.gameOverOverlay}>
+              <View style={styles.gameOverBackdrop} />
+              <View style={styles.gameOverModal}>
+                <Text style={styles.gameOverTitle}>
+                  {vsBotWinner === 'human' ? 'You Win' : 'You Lose'}
+                </Text>
+                <Text style={styles.gameOverSubtitle}>
+                  {vsBotWinner === 'human' ? 'Bot fell into the ditch!' : 'You fell into the ditch!'}
+                </Text>
+                <View style={styles.gameOverButtons}>
+                  <Pressable
+                    style={styles.restartButton}
+                    onPress={() => {
+                      resetBot();
+                      handleVsBotPlay();
+                    }}>
+                    <Text style={styles.buttonText}>Restart</Text>
+                  </Pressable>
+                  <Pressable style={styles.exitButton} onPress={handleExitToHome}>
+                    <Text style={styles.buttonText}>Exit</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
           )}
         </>
       ) : null}
