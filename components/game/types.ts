@@ -5,6 +5,7 @@ import type {
   GameResult,
   OpponentSnapshot,
   Platform,
+  TerrainTheme,
 } from '../../types/game';
 
 export type GameCanvasProps = {
@@ -12,6 +13,7 @@ export type GameCanvasProps = {
   onGameOver?: (result: GameResult) => void;
   onAudioEvent?: (event: GameAudioEvent) => void;
   backgroundIndex?: number;
+  terrainTheme?: TerrainTheme;
   initialGravityDirection?: 1 | -1;
   opponentInitialGravityDirection?: 1 | -1;
   opponentSnapshot?: OpponentSnapshot | null;

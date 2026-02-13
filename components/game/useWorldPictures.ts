@@ -1,26 +1,61 @@
 import { useMemo } from 'react';
 import { Skia, createPicture, rect, useImage, useRSXformBuffer } from '@shopify/react-native-skia';
 import { useDerivedValue } from 'react-native-reanimated';
-import type { Platform } from '../../types/game';
+import type { Platform, TerrainTheme } from '../../types/game';
 import { GAME_BACKGROUNDS } from '../../utils/backgrounds';
 import {
   BACKGROUND_SCROLL_FACTOR,
-  BACKGROUND_TILE_SCALE,
   CHAR_SCALE,
   CHAR_SIZE,
   ENABLE_COLLIDER_DEBUG_UI,
   OPPONENT_X_FACTOR,
   PLAYER_X_FACTOR,
-  TILEMAP_COLS,
-  TILEMAP_SIZE,
   tileSize,
 } from './constants';
 import type { SimulationRefs } from './types';
+
+const TERRAIN_TILE_ASSETS: Record<
+  TerrainTheme,
+  {
+    top: number;
+    topLeft: number;
+    topRight: number;
+    left: number;
+    center: number;
+    right: number;
+  }
+> = {
+  grass: {
+    top: require('../../assets/game/terrain/default/terrain_grass_block_top.png'),
+    topLeft: require('../../assets/game/terrain/default/terrain_grass_block_top_left.png'),
+    topRight: require('../../assets/game/terrain/default/terrain_grass_block_top_right.png'),
+    left: require('../../assets/game/terrain/default/terrain_grass_block_left.png'),
+    center: require('../../assets/game/terrain/default/terrain_grass_block_center.png'),
+    right: require('../../assets/game/terrain/default/terrain_grass_block_right.png'),
+  },
+  purple: {
+    top: require('../../assets/game/terrain/default/terrain_purple_block_top.png'),
+    topLeft: require('../../assets/game/terrain/default/terrain_purple_block_top_left.png'),
+    topRight: require('../../assets/game/terrain/default/terrain_purple_block_top_right.png'),
+    left: require('../../assets/game/terrain/default/terrain_purple_block_left.png'),
+    center: require('../../assets/game/terrain/default/terrain_purple_block_center.png'),
+    right: require('../../assets/game/terrain/default/terrain_purple_block_right.png'),
+  },
+  stone: {
+    top: require('../../assets/game/terrain/default/terrain_stone_block_top.png'),
+    topLeft: require('../../assets/game/terrain/default/terrain_stone_block_top_left.png'),
+    topRight: require('../../assets/game/terrain/default/terrain_stone_block_top_right.png'),
+    left: require('../../assets/game/terrain/default/terrain_stone_block_left.png'),
+    center: require('../../assets/game/terrain/default/terrain_stone_block_center.png'),
+    right: require('../../assets/game/terrain/default/terrain_stone_block_right.png'),
+  },
+};
 
 interface UseWorldPicturesArgs {
   width: number;
   height: number;
   backgroundIndex: number;
+  terrainTheme: TerrainTheme;
   platforms: Platform[];
   refs: Pick<
     SimulationRefs,
@@ -39,6 +74,7 @@ export const useWorldPictures = ({
   width,
   height,
   backgroundIndex,
+  terrainTheme,
   platforms,
   refs,
 }: UseWorldPicturesArgs) => {
@@ -48,10 +84,22 @@ export const useWorldPictures = ({
       ? ((backgroundIndex % totalBackgrounds) + totalBackgrounds) % totalBackgrounds
       : 0;
   const backgroundSource = GAME_BACKGROUNDS[safeBackgroundIndex];
+  const terrainAssets = TERRAIN_TILE_ASSETS[terrainTheme];
 
   const backgroundImage = useImage(backgroundSource);
-  const backgroundTileWidth = backgroundImage ? backgroundImage.width() * BACKGROUND_TILE_SCALE : 0;
-  const tilemapImage = useImage(require('../../assets/game/terrain.png'));
+  const backgroundTileWidth = useMemo(() => {
+    if (!backgroundImage || height <= 0) return 0;
+    const sourceHeight = backgroundImage.height();
+    if (sourceHeight <= 0) return 0;
+    const fitScale = height / sourceHeight;
+    return backgroundImage.width() * fitScale;
+  }, [backgroundImage, height]);
+  const terrainTopImage = useImage(terrainAssets.top);
+  const terrainTopLeftImage = useImage(terrainAssets.topLeft);
+  const terrainTopRightImage = useImage(terrainAssets.topRight);
+  const terrainLeftImage = useImage(terrainAssets.left);
+  const terrainCenterImage = useImage(terrainAssets.center);
+  const terrainRightImage = useImage(terrainAssets.right);
   const characterImage = useImage(
     require('../../assets/platform assets/Tilemap/tilemap-characters_packed.png')
   );
@@ -101,20 +149,19 @@ export const useWorldPictures = ({
 
     const sourceWidth = backgroundImage.width();
     const sourceHeight = backgroundImage.height();
-    const tileWidth = sourceWidth * BACKGROUND_TILE_SCALE;
-    const tileHeight = sourceHeight * BACKGROUND_TILE_SCALE;
+    const fitScale = height / sourceHeight;
+    const tileWidth = sourceWidth * fitScale;
+    const tileHeight = sourceHeight * fitScale;
     const srcRect = Skia.XYWHRect(0, 0, sourceWidth, sourceHeight);
 
     return createPicture(
       (canvas) => {
-        for (let y = -tileHeight; y < height + tileHeight; y += tileHeight) {
-          for (let x = -tileWidth; x < width + tileWidth; x += tileWidth) {
-            const dstRect = Skia.XYWHRect(x, y, tileWidth, tileHeight);
-            canvas.drawImageRect(backgroundImage, srcRect, dstRect, paint);
-          }
+        for (let x = -tileWidth; x < width + tileWidth; x += tileWidth) {
+          const dstRect = Skia.XYWHRect(x, 0, tileWidth, tileHeight);
+          canvas.drawImageRect(backgroundImage, srcRect, dstRect, paint);
         }
       },
-      Skia.XYWHRect(-tileWidth, -tileHeight, width + tileWidth * 2, height + tileHeight * 2)
+      Skia.XYWHRect(-tileWidth, 0, width + tileWidth * 2, height)
     );
   }, [backgroundImage, width, height]);
 
@@ -125,60 +172,94 @@ export const useWorldPictures = ({
   }, [backgroundTileWidth]);
 
   const platformsPicture = useMemo(() => {
-    if (!tilemapImage || width <= 0 || height <= 0 || platforms.length === 0) return null;
+    if (
+      !terrainTopImage ||
+      !terrainTopLeftImage ||
+      !terrainTopRightImage ||
+      !terrainLeftImage ||
+      !terrainCenterImage ||
+      !terrainRightImage ||
+      width <= 0 ||
+      height <= 0 ||
+      platforms.length === 0
+    )
+      return null;
     const paint = Skia.Paint();
     paint.setAntiAlias(false);
-    const getSrcRect = (tileIndex: number) => {
-      const col = tileIndex % TILEMAP_COLS;
-      const row = Math.floor(tileIndex / TILEMAP_COLS);
-      return Skia.XYWHRect(col * TILEMAP_SIZE, row * TILEMAP_SIZE, TILEMAP_SIZE, TILEMAP_SIZE);
-    };
-    const GRASS = { left: 6, center: 7, right: 8 };
-    const DIRT = { left: 28, center: 29, right: 30 };
-    const CENTER_PLATFORM_TOP = { left: 34, center: 35, right: 36 };
-    const CENTER_PLATFORM_BOTTOM = { left: 34, center: 35, right: 36 };
 
-    const startEdges = new Set<string>();
-    const endEdges = new Set<string>();
-    for (const p of platforms) {
-      const y = Math.round(p.y);
-      const h = Math.round(p.height);
-      startEdges.add(`${p.surface}:${y}:${h}:${Math.round(p.x)}`);
-      endEdges.add(`${p.surface}:${y}:${h}:${Math.round(p.x + p.width)}`);
-    }
-
+    const topSrcRect = Skia.XYWHRect(0, 0, terrainTopImage.width(), terrainTopImage.height());
+    const topLeftSrcRect = Skia.XYWHRect(
+      0,
+      0,
+      terrainTopLeftImage.width(),
+      terrainTopLeftImage.height()
+    );
+    const topRightSrcRect = Skia.XYWHRect(
+      0,
+      0,
+      terrainTopRightImage.width(),
+      terrainTopRightImage.height()
+    );
+    const leftSrcRect = Skia.XYWHRect(0, 0, terrainLeftImage.width(), terrainLeftImage.height());
+    const centerSrcRect = Skia.XYWHRect(
+      0,
+      0,
+      terrainCenterImage.width(),
+      terrainCenterImage.height()
+    );
+    const rightSrcRect = Skia.XYWHRect(
+      0,
+      0,
+      terrainRightImage.width(),
+      terrainRightImage.height()
+    );
     const margin = tileSize * 2;
     const maxX = Math.max(...platforms.map((p) => p.x + p.width), width * 3) + margin;
     return createPicture(
       (canvas) => {
         for (const p of platforms) {
           const y = Math.round(p.y);
-          const h = Math.round(p.height);
-          const hasLeftNeighbor = endEdges.has(`${p.surface}:${y}:${h}:${Math.round(p.x)}`);
-          const hasRightNeighbor = startEdges.has(
-            `${p.surface}:${y}:${h}:${Math.round(p.x + p.width)}`
-          );
           const cols = Math.ceil(p.width / tileSize);
           const rows = Math.ceil(p.height / tileSize);
           for (let row = 0; row < rows; row++) {
             const isSurface = p.surface === 'top' ? row === rows - 1 : row === 0;
-            const tiles =
-              p.surface === 'pillar'
-                ? row === 0
-                  ? CENTER_PLATFORM_TOP
-                  : CENTER_PLATFORM_BOTTOM
-                : isSurface
-                  ? GRASS
-                  : DIRT;
-            const leftTile = hasLeftNeighbor ? tiles.center : tiles.left;
-            const rightTile = hasRightNeighbor ? tiles.center : tiles.right;
             for (let col = 0; col < cols; col++) {
               const remainingWidth = p.width - col * tileSize;
               const drawWidth = Math.min(tileSize, remainingWidth);
               if (drawWidth <= 0) continue;
-              const tileIndex = col === 0 ? leftTile : col === cols - 1 ? rightTile : tiles.center;
-              const srcRect = getSrcRect(tileIndex);
-              const srcWidth = (drawWidth / tileSize) * TILEMAP_SIZE;
+
+              const isOnlyCol = cols === 1;
+              const isLeftEdge = col === 0;
+              const isRightEdge = col === cols - 1;
+
+              let sourceImage = terrainCenterImage;
+              let srcRect = centerSrcRect;
+
+              if (isSurface || (p.surface === 'pillar' && row === 0)) {
+                if (isOnlyCol) {
+                  sourceImage = terrainTopImage;
+                  srcRect = topSrcRect;
+                } else if (isLeftEdge) {
+                  sourceImage = terrainTopLeftImage;
+                  srcRect = topLeftSrcRect;
+                } else if (isRightEdge) {
+                  sourceImage = terrainTopRightImage;
+                  srcRect = topRightSrcRect;
+                } else {
+                  sourceImage = terrainTopImage;
+                  srcRect = topSrcRect;
+                }
+              } else if (!isOnlyCol) {
+                if (isLeftEdge) {
+                  sourceImage = terrainLeftImage;
+                  srcRect = leftSrcRect;
+                } else if (isRightEdge) {
+                  sourceImage = terrainRightImage;
+                  srcRect = rightSrcRect;
+                }
+              }
+
+              const srcWidth = (drawWidth / tileSize) * srcRect.width;
               const clippedSrcRect = Skia.XYWHRect(srcRect.x, srcRect.y, srcWidth, srcRect.height);
               const x = Math.floor(p.x + col * tileSize);
               const y = Math.floor(p.y + row * tileSize);
@@ -189,14 +270,14 @@ export const useWorldPictures = ({
                 canvas.translate(x, y + tileSize);
                 canvas.scale(1, -1);
                 canvas.drawImageRect(
-                  tilemapImage,
+                  sourceImage,
                   clippedSrcRect,
                   Skia.XYWHRect(0, 0, drawWidth, tileSize),
                   paint
                 );
                 canvas.restore();
               } else {
-                canvas.drawImageRect(tilemapImage, clippedSrcRect, dst, paint);
+                canvas.drawImageRect(sourceImage, clippedSrcRect, dst, paint);
               }
             }
           }
@@ -204,7 +285,17 @@ export const useWorldPictures = ({
       },
       Skia.XYWHRect(0, 0, maxX, height)
     );
-  }, [tilemapImage, height, width, platforms]);
+  }, [
+    terrainCenterImage,
+    terrainLeftImage,
+    terrainRightImage,
+    terrainTopImage,
+    terrainTopLeftImage,
+    terrainTopRightImage,
+    height,
+    width,
+    platforms,
+  ]);
 
   const colliderDebugPicture = useMemo(() => {
     if (!ENABLE_COLLIDER_DEBUG_UI || width <= 0 || height <= 0 || platforms.length === 0)

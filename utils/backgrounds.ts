@@ -1,12 +1,19 @@
 // Typed as number[] so the same require() results work with both RN Image and Skia useImage (DataSourceParam).
 export const GAME_BACKGROUNDS: number[] = [
-  require('../assets/game/backgrounds/Blue.png'),
-  require('../assets/game/backgrounds/Brown.png'),
-  require('../assets/game/backgrounds/Gray.png'),
-  require('../assets/game/backgrounds/Green.png'),
-  require('../assets/game/backgrounds/Pink.png'),
-  require('../assets/game/backgrounds/Purple.png'),
-  require('../assets/game/backgrounds/Yellow.png'),
+  require('../assets/game/backgrounds/kenney/background_clouds.png'),
+  require('../assets/game/backgrounds/kenney/background_color_desert.png'),
+  require('../assets/game/backgrounds/kenney/background_color_hills.png'),
+  require('../assets/game/backgrounds/kenney/background_color_mushrooms.png'),
+  require('../assets/game/backgrounds/kenney/background_color_trees.png'),
+  require('../assets/game/backgrounds/kenney/background_fade_desert.png'),
+  require('../assets/game/backgrounds/kenney/background_fade_hills.png'),
+  require('../assets/game/backgrounds/kenney/background_fade_mushrooms.png'),
+  require('../assets/game/backgrounds/kenney/background_fade_trees.png'),
+  require('../assets/game/backgrounds/kenney/background_solid_cloud.png'),
+  require('../assets/game/backgrounds/kenney/background_solid_dirt.png'),
+  require('../assets/game/backgrounds/kenney/background_solid_grass.png'),
+  require('../assets/game/backgrounds/kenney/background_solid_sand.png'),
+  require('../assets/game/backgrounds/kenney/background_solid_sky.png'),
 ];
 
 export const getRandomBackgroundIndex = (previousIndex?: number) => {

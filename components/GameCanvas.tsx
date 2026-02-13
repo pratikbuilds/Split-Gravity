@@ -17,6 +17,7 @@ export const GameCanvas = ({
   onGameOver,
   onAudioEvent,
   backgroundIndex = 0,
+  terrainTheme = 'grass',
   initialGravityDirection = 1,
   opponentInitialGravityDirection,
   opponentSnapshot,
@@ -145,6 +146,7 @@ export const GameCanvas = ({
     width,
     height,
     backgroundIndex,
+    terrainTheme,
     platforms,
     refs,
   });

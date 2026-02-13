@@ -6,7 +6,13 @@ import { GameCanvas } from 'components/GameCanvas';
 import { HomeScreen } from 'components/HomeScreen';
 import { LobbyScreen } from 'components/multiplayer/LobbyScreen';
 import { getRandomBackgroundIndex } from './utils/backgrounds';
-import type { GameAudioEvent, GameMode, GameResult, MultiplayerResult } from './types/game';
+import type {
+  GameAudioEvent,
+  GameMode,
+  GameResult,
+  MultiplayerResult,
+  TerrainTheme,
+} from './types/game';
 import {
   configureAudioMode,
   loadSounds,
@@ -21,6 +27,16 @@ import {
 
 import './global.css';
 
+const TERRAIN_THEMES: TerrainTheme[] = ['grass', 'purple', 'stone'];
+
+function getRandomTerrainTheme(previousTheme?: TerrainTheme): TerrainTheme {
+  if (TERRAIN_THEMES.length === 1) return TERRAIN_THEMES[0];
+  const candidates = previousTheme
+    ? TERRAIN_THEMES.filter((theme) => theme !== previousTheme)
+    : TERRAIN_THEMES;
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
 export default function App() {
   const [screen, setScreen] = useState<'home' | 'lobby' | 'game'>('home');
   const [mode, setMode] = useState<GameMode>('single');
@@ -28,6 +44,7 @@ export default function App() {
   const [lastResult, setLastResult] = useState<GameResult | null>(null);
   const [gameOver, setGameOver] = useState(false);
   const [backgroundIndex, setBackgroundIndex] = useState(() => getRandomBackgroundIndex());
+  const [terrainTheme, setTerrainTheme] = useState<TerrainTheme>(() => getRandomTerrainTheme());
   const [isMuted, setIsMuted] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
   const [localMultiplayerDeathScore, setLocalMultiplayerDeathScore] = useState<number | null>(null);
@@ -87,6 +104,7 @@ export default function App() {
 
     triggerSound('run_start');
     setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
+    setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
     setLocalMultiplayerDeathScore(null);
     setGameOver(false);
     setLastResult(null);
@@ -132,6 +150,7 @@ export default function App() {
     triggerSound('run_start');
     setGameOver(false);
     setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
+    setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
     setGameKey((k) => k + 1);
   };
 
@@ -141,6 +160,7 @@ export default function App() {
     setGameOver(false);
     setLastResult(null);
     setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
+    setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
     setGameKey((k) => k + 1);
     setScreen('game');
   };
@@ -242,6 +262,7 @@ export default function App() {
             onGameOver={handleSinglePlayerGameOver}
             onAudioEvent={triggerSound}
             backgroundIndex={backgroundIndex}
+            terrainTheme={terrainTheme}
             initialGravityDirection={localInitialGravityDirection}
             opponentInitialGravityDirection={opponentInitialGravityDirection}
             opponentSnapshot={mode === 'multi' ? multiplayerState.opponentSnapshot : null}

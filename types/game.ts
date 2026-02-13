@@ -1,9 +1,10 @@
+export type TerrainTheme = 'grass' | 'purple' | 'stone';
+
 export interface Platform {
   x: number; // world X (scroll space)
   y: number; // screen Y from top (top of platform)
   width: number;
   height: number;
-  tileType: 'grass' | 'dirt' | 'crate';
   surface: 'bottom' | 'top' | 'pillar';
 }
 

@@ -81,7 +81,6 @@ function createPlatform(
     y: Math.round(y),
     width: Math.round(width),
     height: Math.round(height),
-    tileType: 'grass',
     surface,
   };
 }
