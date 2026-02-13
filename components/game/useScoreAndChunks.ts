@@ -27,6 +27,7 @@ interface UseScoreAndChunksArgs {
     | 'frameIndex'
     | 'charX'
     | 'initialized'
+    | 'flipLockedUntilLanding'
     | 'platformRects'
     | 'lastGroundedAtMs'
   >;
@@ -59,6 +60,7 @@ export const useScoreAndChunks = ({
     refs.posY.value = spawnGravity === -1 ? groundHeight : groundY - charH;
     refs.velocityY.value = 0;
     refs.gravityDirection.value = spawnGravity;
+    refs.flipLockedUntilLanding.value = 0;
     refs.velocityX.value = 0;
     refs.totalScroll.value = 0;
     refs.gameOver.value = 0;

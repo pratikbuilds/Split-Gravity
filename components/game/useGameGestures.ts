@@ -24,6 +24,7 @@ interface UseGameGesturesArgs {
     | 'countdownLocked'
     | 'groundY'
     | 'gravityDirection'
+    | 'flipLockedUntilLanding'
     | 'totalScroll'
     | 'charX'
     | 'simTimeMs'
@@ -45,6 +46,7 @@ export const useGameGestures = ({ refs, triggerAudioEvent, onFlipInput }: UseGam
         if (refs.gameOver.value === 1 || refs.dying.value === 1) return;
         if (refs.initialized.value === 0) return;
         if (refs.countdownLocked.value === 1) return;
+        if (refs.flipLockedUntilLanding.value === 1) return;
 
         const gY = refs.groundY.value;
         const charH = CHAR_SIZE * CHAR_SCALE;
@@ -76,6 +78,7 @@ export const useGameGestures = ({ refs, triggerAudioEvent, onFlipInput }: UseGam
           if (onFlipInput) {
             scheduleOnRN(onFlipInput);
           }
+          refs.flipLockedUntilLanding.value = 1;
           refs.gravityDirection.value = -gDir;
           refs.velocityY.value = 0;
           refs.velocityX.value = FLIP_ARC_FORWARD;

@@ -34,6 +34,7 @@ export const GameCanvas = ({
   const posY = useSharedValue(0);
   const velocityY = useSharedValue(0);
   const gravityDirection = useSharedValue(1);
+  const flipLockedUntilLanding = useSharedValue(0);
   const frameIndex = useSharedValue(0);
   const elapsedMs = useSharedValue(0);
   const gameOver = useSharedValue(0);
@@ -57,6 +58,7 @@ export const GameCanvas = ({
       posY,
       velocityY,
       gravityDirection,
+      flipLockedUntilLanding,
       frameIndex,
       elapsedMs,
       gameOver,
@@ -81,6 +83,7 @@ export const GameCanvas = ({
       elapsedMs,
       frameIndex,
       gameOver,
+      flipLockedUntilLanding,
       gravityDirection,
       groundY,
       initialized,

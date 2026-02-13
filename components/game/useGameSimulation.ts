@@ -96,6 +96,7 @@ interface UseGameSimulationArgs {
     | 'posY'
     | 'velocityY'
     | 'gravityDirection'
+    | 'flipLockedUntilLanding'
     | 'frameIndex'
     | 'elapsedMs'
     | 'gameOver'
@@ -235,6 +236,7 @@ export const useGameSimulation = ({
             refs.posY.value = snapY;
           }
           refs.velocityY.value = 0;
+          refs.flipLockedUntilLanding.value = 0;
           refs.lastGroundedAtMs.value = refs.simTimeMs.value;
           refs.velocityX.value = 0;
         } else if (refs.velocityX.value > 0) {

@@ -35,6 +35,7 @@ export interface SimulationRefs {
   posY: SharedValue<number>;
   velocityY: SharedValue<number>;
   gravityDirection: SharedValue<number>;
+  flipLockedUntilLanding: SharedValue<number>;
   frameIndex: SharedValue<number>;
   elapsedMs: SharedValue<number>;
   gameOver: SharedValue<number>;
