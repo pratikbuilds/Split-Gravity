@@ -141,3 +141,35 @@ test('isGrounded accepts near-surface epsilon offsets (anti-jitter support)', ()
     true
   );
 });
+
+test('resolveSideBlock clamps rightward entry into platform side while preserving vertical landings', () => {
+  const rects = [100, 120, 40, 64];
+
+  const sideBlock = physics.resolveSideBlock({
+    rects,
+    prevLeft: 60,
+    prevRight: 96,
+    prevTop: 136,
+    prevBottom: 172,
+    charLeft: 68,
+    charRight: 104,
+    charTop: 136,
+    charBottom: 172,
+    groundedEpsilon: 4,
+  });
+  assert.equal(sideBlock, 64);
+
+  const landingCase = physics.resolveSideBlock({
+    rects,
+    prevLeft: 60,
+    prevRight: 96,
+    prevTop: 80,
+    prevBottom: 116,
+    charLeft: 68,
+    charRight: 104,
+    charTop: 90,
+    charBottom: 126,
+    groundedEpsilon: 4,
+  });
+  assert.equal(landingCase, null);
+});

@@ -38,6 +38,19 @@ export type GroundedCheckInput = {
   groundedEpsilon: number;
 };
 
+export type SideBlockInput = {
+  rects: number[];
+  prevLeft: number;
+  prevRight: number;
+  prevTop: number;
+  prevBottom: number;
+  charLeft: number;
+  charRight: number;
+  charTop: number;
+  charBottom: number;
+  groundedEpsilon: number;
+};
+
 export function normalizeFrameStep(rawDt: number, maxDt = 64, baseStepMs = 16): FrameStep {
   'worklet';
   const dt = Math.min(maxDt, Math.max(1, rawDt));
@@ -91,6 +104,54 @@ export function scanCollisionSurfaces({
     farthestDownSurface,
     nearestUpSurface,
   };
+}
+
+export function resolveSideBlock({
+  rects,
+  prevLeft,
+  prevRight,
+  prevTop,
+  prevBottom,
+  charLeft,
+  charRight,
+  charTop,
+  charBottom,
+  groundedEpsilon,
+}: SideBlockInput): number | null {
+  'worklet';
+  if (charRight <= prevRight) {
+    return null;
+  }
+
+  let blockedLeft: number | null = null;
+  for (let i = 0; i < rects.length; i += 4) {
+    const px = rects[i];
+    const py = rects[i + 1];
+    const pw = rects[i + 2];
+    const ph = rects[i + 3];
+    const rightFace = px + pw;
+
+    const verticalOverlap = Math.min(charBottom, py + ph) - Math.max(charTop, py);
+    if (verticalOverlap <= 0) continue;
+
+    const crossedDown = prevBottom <= py + groundedEpsilon && charBottom >= py;
+    const crossedUp = prevTop >= py + ph - groundedEpsilon && charTop <= py + ph;
+    if (crossedDown || crossedUp) continue;
+
+    const enteredFromLeft =
+      prevRight <= px + groundedEpsilon &&
+      charRight >= px + groundedEpsilon &&
+      charLeft < rightFace;
+
+    if (!enteredFromLeft) continue;
+
+    const candidateLeft = px - (charRight - charLeft);
+    if (blockedLeft === null || candidateLeft < blockedLeft) {
+      blockedLeft = candidateLeft;
+    }
+  }
+
+  return blockedLeft;
 }
 
 export function isGrounded({

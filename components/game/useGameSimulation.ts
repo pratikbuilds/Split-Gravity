@@ -1,6 +1,11 @@
 import { useFrameCallback } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
-import { isGrounded, normalizeFrameStep, scanCollisionSurfaces } from '../../shared/game/physics';
+import {
+  isGrounded,
+  normalizeFrameStep,
+  resolveSideBlock,
+  scanCollisionSurfaces,
+} from '../../shared/game/physics';
 import { FLAT_ZONE_LENGTH } from '../../types/game';
 import {
   CHAR_SCALE,
@@ -145,6 +150,7 @@ export const useGameSimulation = ({
     refs.simTimeMs.value += dt;
 
     for (let step = 0; step < stepCount; step += 1) {
+      const prevTotalScroll = refs.totalScroll.value;
       const gDir = refs.gravityDirection.value;
       const isDying = refs.dying.value === 1;
       const prevTop = refs.posY.value;
@@ -157,11 +163,35 @@ export const useGameSimulation = ({
       refs.velocityY.value += gDir * GRAVITY * (stepDt / 1000);
       refs.posY.value += refs.velocityY.value * (stepDt / 1000);
 
-      const charWorldX = refs.totalScroll.value + refs.charX.value;
+      let charWorldX = refs.totalScroll.value + refs.charX.value;
       const rects = refs.platformRects.value;
-      const inFlatZone = charWorldX < FLAT_ZONE_LENGTH;
+      let inFlatZone = charWorldX < FLAT_ZONE_LENGTH;
+      const prevLeft = prevTotalScroll + refs.charX.value;
+      const prevRight = prevLeft + charW;
+      const charLeft = charWorldX;
+      const charRight = charWorldX + charW;
       const charTop = refs.posY.value;
       const charBottom = refs.posY.value + charH;
+
+      const blockedLeft = resolveSideBlock({
+        rects,
+        prevLeft,
+        prevRight,
+        prevTop,
+        prevBottom,
+        charLeft,
+        charRight,
+        charTop,
+        charBottom,
+        groundedEpsilon: GROUNDED_EPSILON,
+      });
+      if (blockedLeft !== null) {
+        refs.totalScroll.value = blockedLeft - refs.charX.value;
+        refs.velocityX.value = 0;
+        charWorldX = refs.totalScroll.value + refs.charX.value;
+        inFlatZone = charWorldX < FLAT_ZONE_LENGTH;
+      }
+
       const footLeft = charWorldX + EDGE_CONTACT_MARGIN;
       const footRight = charWorldX + charW - EDGE_CONTACT_MARGIN;
 

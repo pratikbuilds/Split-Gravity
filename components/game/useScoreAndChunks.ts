@@ -84,19 +84,10 @@ export const useScoreAndChunks = ({
   useEffect(() => {
     const rects: number[] = [];
     for (const p of platforms) {
-      const cols = Math.ceil(p.width / tileSize);
-      const rows = Math.ceil(p.height / tileSize);
-      for (let row = 0; row < rows; row++) {
-        const remainingHeight = p.height - row * tileSize;
-        const drawHeight = Math.min(tileSize, remainingHeight);
-        if (drawHeight <= 0) continue;
-        for (let col = 0; col < cols; col++) {
-          const remainingWidth = p.width - col * tileSize;
-          const drawWidth = Math.min(tileSize, remainingWidth);
-          if (drawWidth <= 0) continue;
-          rects.push(p.x + col * tileSize, p.y + row * tileSize, drawWidth, drawHeight);
-        }
-      }
+      // Physics colliders should represent only exposed platform surfaces.
+      // Using a single rect per platform prevents internal tile seams from
+      // being interpreted as valid landing/ceiling collision planes.
+      rects.push(p.x, p.y, p.width, p.height);
     }
     refs.platformRects.value = rects;
   }, [platforms, refs.platformRects]);
