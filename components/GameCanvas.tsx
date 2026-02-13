@@ -175,7 +175,12 @@ export const GameCanvas = ({
 
     const charH = CHAR_SIZE * CHAR_SCALE;
     const laneSpan = Math.max(1, height - 2 * groundHeight - charH);
-    opponentPosY.value = groundHeight + opponentSnapshot.normalizedY * laneSpan;
+    const normalizedY = Math.min(1, Math.max(0, opponentSnapshot.normalizedY));
+    const targetY = groundHeight + normalizedY * laneSpan;
+    const maxStep = charH * 0.35;
+    const delta = targetY - opponentPosY.value;
+    const steppedDelta = Math.max(-maxStep, Math.min(maxStep, delta));
+    opponentPosY.value = opponentPosY.value + steppedDelta;
     opponentGravity.value = opponentSnapshot.gravityDir;
     opponentAlive.value = opponentSnapshot.alive ? 1 : 0;
   }, [height, opponentAlive, opponentGravity, opponentPosY, opponentSnapshot]);

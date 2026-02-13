@@ -1,6 +1,7 @@
 import type { Chunk, Platform } from '../../types/game';
 import { generateLevelChunks, preGenerateLevelChunks } from '../../utils/levelGenerator';
 import { FLAT_ZONE_LENGTH } from '../../types/game';
+import { isGrounded, normalizeFrameStep, scanCollisionSurfaces } from '../../shared/game/physics';
 import {
   CHAR_SCALE,
   CHAR_SIZE,
@@ -16,106 +17,6 @@ import {
   tileSize,
   FLIP_ARC_FORWARD,
 } from '../../components/game/constants';
-
-// JS-only physics (no worklets) - mirrors shared/game/physics.ts and useGameSimulation
-function scanCollisionSurfaces({
-  rects,
-  footLeft,
-  footRight,
-  prevTop,
-  prevBottom,
-  charTop,
-  charBottom,
-  landingMinOverlap,
-  groundedEpsilon,
-}: {
-  rects: number[];
-  footLeft: number;
-  footRight: number;
-  prevTop: number;
-  prevBottom: number;
-  charTop: number;
-  charBottom: number;
-  landingMinOverlap: number;
-  groundedEpsilon: number;
-}) {
-  let nearestDownSurface = Number.POSITIVE_INFINITY;
-  let nearestUpSurface = Number.NEGATIVE_INFINITY;
-  for (let i = 0; i < rects.length; i += 4) {
-    const px = rects[i];
-    const py = rects[i + 1];
-    const pw = rects[i + 2];
-    const ph = rects[i + 3];
-    const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
-    if (overlap < landingMinOverlap) continue;
-    const crossedDown = prevBottom <= py + groundedEpsilon && charBottom >= py;
-    const alreadyOnSurface = Math.abs(prevBottom - py) <= groundedEpsilon;
-    if (py < nearestDownSurface && (crossedDown || alreadyOnSurface)) {
-      nearestDownSurface = py;
-    }
-    const bottomSurface = py + ph;
-    const crossedUp = prevTop >= bottomSurface - groundedEpsilon && charTop <= bottomSurface;
-    const alreadyOnCeiling = Math.abs(prevTop - bottomSurface) <= groundedEpsilon;
-    if (bottomSurface > nearestUpSurface && (crossedUp || alreadyOnCeiling)) {
-      nearestUpSurface = bottomSurface;
-    }
-  }
-  return { nearestDownSurface, nearestUpSurface };
-}
-
-function isGrounded({
-  gravityDir,
-  inFlatZone,
-  posY,
-  charH,
-  groundY,
-  flatTopY,
-  rects,
-  footLeft,
-  footRight,
-  supportMinOverlap,
-  groundedEpsilon,
-}: {
-  gravityDir: 1 | -1;
-  inFlatZone: boolean;
-  posY: number;
-  charH: number;
-  groundY: number;
-  flatTopY: number;
-  rects: number[];
-  footLeft: number;
-  footRight: number;
-  supportMinOverlap: number;
-  groundedEpsilon: number;
-}): boolean {
-  if (gravityDir === 1) {
-    const onBottomFlat = inFlatZone && Math.abs(posY - (groundY - charH)) <= groundedEpsilon;
-    if (onBottomFlat) return true;
-    for (let i = 0; i < rects.length; i += 4) {
-      const px = rects[i];
-      const py = rects[i + 1];
-      const pw = rects[i + 2];
-      const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
-      if (overlap >= supportMinOverlap && Math.abs(posY - (py - charH)) <= groundedEpsilon) {
-        return true;
-      }
-    }
-    return false;
-  }
-  const onTopFlat = inFlatZone && Math.abs(posY - flatTopY) <= groundedEpsilon;
-  if (onTopFlat) return true;
-  for (let i = 0; i < rects.length; i += 4) {
-    const px = rects[i];
-    const py = rects[i + 1];
-    const pw = rects[i + 2];
-    const ph = rects[i + 3];
-    const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
-    if (overlap >= supportMinOverlap && Math.abs(posY - (py + ph)) <= groundedEpsilon) {
-      return true;
-    }
-  }
-  return false;
-}
 
 function resolveGroundSnapY({
   gravityDir,
@@ -174,10 +75,15 @@ function resolveGroundSnapY({
   return bestTarget;
 }
 
-function normalizeFrameStep(rawDt: number, maxDt = 64, baseStepMs = 16) {
-  const dt = Math.min(maxDt, Math.max(1, rawDt));
-  const stepCount = Math.max(1, Math.ceil(dt / baseStepMs));
-  return { dt, stepCount, stepDt: dt / stepCount };
+const BOT_DEBUG_ENABLED = (globalThis as { __BOT_DEBUG__?: boolean }).__BOT_DEBUG__ === true;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function botDebugLog(event: string, payload: Record<string, number | string | boolean>) {
+  if (!BOT_DEBUG_ENABLED) return;
+  console.debug(`[bot:${event}]`, payload);
 }
 
 export interface BotState {
@@ -191,15 +97,14 @@ export interface BotState {
   deathScore: number;
   simTimeMs: number;
   lastGroundedAtMs: number;
+  lastFlipAtMs: number;
+  wasGroundedLastStep: 0 | 1;
+  leftSupportSinceFlip: 0 | 1;
 }
 
-export function createInitialBotState(
-  groundY: number,
-  initialGravityDir: 1 | -1
-): BotState {
+export function createInitialBotState(groundY: number, initialGravityDir: 1 | -1): BotState {
   const charH = CHAR_SIZE * CHAR_SCALE;
-  const posY =
-    initialGravityDir === -1 ? groundHeight : groundY - charH;
+  const posY = initialGravityDir === -1 ? groundHeight : groundY - charH;
   return {
     scroll: 0,
     posY,
@@ -211,7 +116,16 @@ export function createInitialBotState(
     deathScore: 0,
     simTimeMs: 0,
     lastGroundedAtMs: 0,
+    lastFlipAtMs: Number.NEGATIVE_INFINITY,
+    wasGroundedLastStep: 1,
+    leftSupportSinceFlip: 1,
   };
+}
+
+export function projectBotNormalizedY(posY: number, height: number, charH: number): number {
+  const laneSpan = Math.max(1, height - 2 * groundHeight - charH);
+  const normalizedY = (posY - groundHeight) / laneSpan;
+  return clamp(normalizedY, 0, 1);
 }
 
 export function platformsToRects(platforms: Platform[]): number[] {
@@ -227,12 +141,7 @@ export function platformsToRects(platforms: Platform[]): number[] {
         const remainingWidth = p.width - col * tileSize;
         const drawWidth = Math.min(tileSize, remainingWidth);
         if (drawWidth <= 0) continue;
-        rects.push(
-          p.x + col * tileSize,
-          p.y + row * tileSize,
-          drawWidth,
-          drawHeight
-        );
+        rects.push(p.x + col * tileSize, p.y + row * tileSize, drawWidth, drawHeight);
       }
     }
   }
@@ -246,14 +155,7 @@ export function ensureBotChunks(
   groundY: number,
   existingChunks: Chunk[]
 ): Chunk[] {
-  const newChunks = generateLevelChunks(
-    scroll,
-    width,
-    height,
-    groundY,
-    tileSize,
-    existingChunks
-  );
+  const newChunks = generateLevelChunks(scroll, width, height, groundY, tileSize, existingChunks);
   return newChunks;
 }
 
@@ -307,23 +209,27 @@ export function stepBotPhysics(
       groundedEpsilon: GROUNDED_EPSILON,
     });
 
+    if (BOT_DEBUG_ENABLED && gDir === 1 && nearestDownSurface < Number.POSITIVE_INFINITY) {
+      const penetrationDepth = charBottom - nearestDownSurface;
+      if (penetrationDepth > GROUNDED_EPSILON * 1.5) {
+        botDebugLog('penetration', {
+          t: s.simTimeMs,
+          depth: penetrationDepth,
+          posY: s.posY,
+          nearestDownSurface,
+        });
+      }
+    }
+
     if (!isDying) {
-      if (
-        gDir === 1 &&
-        s.velocityY >= 0 &&
-        nearestDownSurface < Number.POSITIVE_INFINITY
-      ) {
+      if (gDir === 1 && s.velocityY >= 0 && nearestDownSurface < Number.POSITIVE_INFINITY) {
         s = {
           ...s,
           posY: nearestDownSurface - charH,
           velocityY: 0,
         };
       }
-      if (
-        gDir === -1 &&
-        s.velocityY <= 0 &&
-        nearestUpSurface > Number.NEGATIVE_INFINITY
-      ) {
+      if (gDir === -1 && s.velocityY <= 0 && nearestUpSurface > Number.NEGATIVE_INFINITY) {
         s = { ...s, posY: nearestUpSurface, velocityY: 0 };
       }
       if (gDir === 1 && inFlatZone && s.posY + charH >= groundY) {
@@ -362,6 +268,16 @@ export function stepBotPhysics(
           groundedEpsilon: GROUNDED_EPSILON,
         });
         if (snapY !== null) {
+          const snapDelta = Math.abs(s.posY - snapY);
+          if (snapDelta > GROUNDED_EPSILON * 1.5) {
+            botDebugLog('snap-delta', {
+              t: s.simTimeMs,
+              delta: snapDelta,
+              posY: s.posY,
+              snapY,
+              gDir,
+            });
+          }
           s = { ...s, posY: snapY };
         }
         s = {
@@ -369,14 +285,26 @@ export function stepBotPhysics(
           velocityY: 0,
           lastGroundedAtMs: s.simTimeMs,
           velocityX: 0,
+          wasGroundedLastStep: 1,
         };
       } else if (s.velocityX > 0) {
         s = {
           ...s,
           scroll: s.scroll + s.velocityX * (stepDt / 1000),
           velocityX: Math.max(0, s.velocityX * FLIP_ARC_DECAY),
+          wasGroundedLastStep: 0,
         };
         if (s.velocityX < 1) s = { ...s, velocityX: 0 };
+        if (s.lastFlipAtMs > Number.NEGATIVE_INFINITY) {
+          s = { ...s, leftSupportSinceFlip: 1 };
+        }
+      } else {
+        s = {
+          ...s,
+          wasGroundedLastStep: 0,
+          leftSupportSinceFlip:
+            s.lastFlipAtMs > Number.NEGATIVE_INFINITY ? 1 : s.leftSupportSinceFlip,
+        };
       }
 
       if (!inFlatZone && !grounded) {
@@ -419,16 +347,14 @@ export function applyBotFlip(state: BotState): BotState {
   if (state.gameOver === 1 || state.dying === 1) return state;
   return {
     ...state,
-    gravityDir: (-state.gravityDir) as 1 | -1,
+    gravityDir: -state.gravityDir as 1 | -1,
     velocityY: 0,
     velocityX: FLIP_ARC_FORWARD,
+    lastFlipAtMs: state.simTimeMs,
+    leftSupportSinceFlip: 0,
   };
 }
 
-export function preGenerateBotChunks(
-  width: number,
-  height: number,
-  groundY: number
-): Chunk[] {
+export function preGenerateBotChunks(width: number, height: number, groundY: number): Chunk[] {
   return preGenerateLevelChunks(width, height, groundY, tileSize);
 }
