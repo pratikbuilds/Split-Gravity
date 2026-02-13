@@ -61,6 +61,7 @@ interface UseWorldPicturesArgs {
     SimulationRefs,
     | 'totalScroll'
     | 'frameIndex'
+    | 'countdownLocked'
     | 'charX'
     | 'posY'
     | 'gravityDirection'
@@ -137,7 +138,7 @@ export const useWorldPictures = ({
   });
 
   const characterSprites = useDerivedValue(() => {
-    const frame = Math.floor(refs.frameIndex.value) % 2;
+    const frame = refs.countdownLocked.value === 1 ? 0 : Math.floor(refs.frameIndex.value) % 2;
     return [rect(frame * CHAR_SIZE, 0, CHAR_SIZE, CHAR_SIZE)];
   });
 
@@ -207,12 +208,7 @@ export const useWorldPictures = ({
       terrainCenterImage.width(),
       terrainCenterImage.height()
     );
-    const rightSrcRect = Skia.XYWHRect(
-      0,
-      0,
-      terrainRightImage.width(),
-      terrainRightImage.height()
-    );
+    const rightSrcRect = Skia.XYWHRect(0, 0, terrainRightImage.width(), terrainRightImage.height());
     const margin = tileSize * 2;
     const maxX = Math.max(...platforms.map((p) => p.x + p.width), width * 3) + margin;
     return createPicture(

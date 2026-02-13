@@ -20,6 +20,8 @@ interface UseGameGesturesArgs {
     SimulationRefs,
     | 'gameOver'
     | 'dying'
+    | 'initialized'
+    | 'countdownLocked'
     | 'groundY'
     | 'gravityDirection'
     | 'totalScroll'
@@ -41,6 +43,8 @@ export const useGameGestures = ({ refs, triggerAudioEvent, onFlipInput }: UseGam
       Gesture.Tap().onEnd(() => {
         'worklet';
         if (refs.gameOver.value === 1 || refs.dying.value === 1) return;
+        if (refs.initialized.value === 0) return;
+        if (refs.countdownLocked.value === 1) return;
 
         const gY = refs.groundY.value;
         const charH = CHAR_SIZE * CHAR_SCALE;

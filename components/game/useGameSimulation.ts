@@ -104,6 +104,7 @@ interface UseGameSimulationArgs {
     | 'velocityX'
     | 'totalScroll'
     | 'initialized'
+    | 'countdownLocked'
     | 'charX'
     | 'simTimeMs'
     | 'lastGroundedAtMs'
@@ -133,6 +134,7 @@ export const useGameSimulation = ({
     'worklet';
     if (refs.gameOver.value === 1) return;
     if (refs.initialized.value === 0) return;
+    if (refs.countdownLocked.value === 1) return;
 
     const gY = refs.groundY.value;
     const rawDt = frameInfo.timeSincePreviousFrame ?? 16;

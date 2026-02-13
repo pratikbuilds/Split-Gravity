@@ -102,7 +102,6 @@ export default function App() {
     if (multiplayerState.matchStatus !== 'running') return;
     if (!hasMultiplayerPair) return;
 
-    triggerSound('run_start');
     setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
     setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
     setLocalMultiplayerDeathScore(null);
@@ -110,7 +109,7 @@ export default function App() {
     setLastResult(null);
     setGameKey((k) => k + 1);
     setScreen('game');
-  }, [hasMultiplayerPair, mode, multiplayerState.matchStatus, triggerSound]);
+  }, [hasMultiplayerPair, mode, multiplayerState.matchStatus]);
 
   useEffect(() => {
     let mounted = true;
@@ -147,7 +146,6 @@ export default function App() {
   };
 
   const handleRestart = () => {
-    triggerSound('run_start');
     setGameOver(false);
     setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
     setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
@@ -156,7 +154,6 @@ export default function App() {
 
   const handleSinglePlay = () => {
     setMode('single');
-    triggerSound('run_start');
     setGameOver(false);
     setLastResult(null);
     setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));

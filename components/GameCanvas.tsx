@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Image, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { GestureDetector } from 'react-native-gesture-handler';
 import { useSharedValue } from 'react-native-reanimated';
@@ -27,6 +27,7 @@ export const GameCanvas = ({
   onLocalState,
   onLocalDeath,
 }: GameCanvasProps) => {
+  const [countdownDigit, setCountdownDigit] = useState<3 | 2 | 1 | null>(3);
   const { width, height } = useWindowDimensions();
 
   const groundY = useSharedValue(0);
@@ -41,6 +42,7 @@ export const GameCanvas = ({
   const velocityX = useSharedValue(0);
   const totalScroll = useSharedValue(0);
   const initialized = useSharedValue(0);
+  const countdownLocked = useSharedValue(1);
   const charX = useSharedValue(0);
   const simTimeMs = useSharedValue(0);
   const lastGroundedAtMs = useSharedValue(0);
@@ -63,6 +65,7 @@ export const GameCanvas = ({
       velocityX,
       totalScroll,
       initialized,
+      countdownLocked,
       charX,
       simTimeMs,
       lastGroundedAtMs,
@@ -81,6 +84,7 @@ export const GameCanvas = ({
       gravityDirection,
       groundY,
       initialized,
+      countdownLocked,
       lastGroundedAtMs,
       opponentAlive,
       opponentGravity,
@@ -170,6 +174,50 @@ export const GameCanvas = ({
   ]);
 
   useEffect(() => {
+    countdownLocked.value = 1;
+    refs.initialized.value = 0;
+    refs.velocityX.value = 0;
+    setCountdownDigit(3);
+
+    let nextDigit: 3 | 2 | 1 | null = 3;
+    const timer = setInterval(() => {
+      if (nextDigit === 3) {
+        nextDigit = 2;
+        setCountdownDigit(2);
+        return;
+      }
+      if (nextDigit === 2) {
+        nextDigit = 1;
+        setCountdownDigit(1);
+        return;
+      }
+      clearInterval(timer);
+      nextDigit = null;
+      setCountdownDigit(null);
+      countdownLocked.value = 0;
+      refs.initialized.value = 1;
+      triggerAudioEvent('run_start');
+    }, 1000);
+
+    return () => {
+      clearInterval(timer);
+    };
+  }, [countdownLocked, refs.initialized, refs.velocityX, triggerAudioEvent]);
+
+  const countdownImageSource = useMemo(() => {
+    if (countdownDigit === 1) {
+      return require('../assets/game/hud/hud_character_1.png');
+    }
+    if (countdownDigit === 2) {
+      return require('../assets/game/hud/hud_character_2.png');
+    }
+    if (countdownDigit === 3) {
+      return require('../assets/game/hud/hud_character_3.png');
+    }
+    return null;
+  }, [countdownDigit]);
+
+  useEffect(() => {
     if (!opponentSnapshot) {
       opponentAlive.value = 0;
       return;
@@ -235,6 +283,13 @@ export const GameCanvas = ({
       {ENABLE_COLLIDER_DEBUG_UI && (
         <View pointerEvents="none" style={[styles.debugHud, { top: 8 }]}>
           <Text style={styles.debugHudText}>BOX COLLIDERS ON</Text>
+        </View>
+      )}
+
+      {countdownImageSource && (
+        <View pointerEvents="none" style={styles.countdownOverlay}>
+          <Text style={styles.countdownLabel}>Game starts in</Text>
+          <Image source={countdownImageSource} style={styles.countdownDigit} resizeMode="contain" />
         </View>
       )}
 
@@ -341,5 +396,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 0.8,
+  },
+  countdownOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(4,12,20,0.3)',
+  },
+  countdownLabel: {
+    color: '#ffffff',
+    fontSize: 24,
+    fontWeight: '800',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 14,
+    textShadowColor: 'rgba(0,0,0,0.45)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  countdownDigit: {
+    width: 88,
+    height: 88,
   },
 });

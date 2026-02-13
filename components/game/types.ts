@@ -43,6 +43,7 @@ export interface SimulationRefs {
   velocityX: SharedValue<number>;
   totalScroll: SharedValue<number>;
   initialized: SharedValue<number>;
+  countdownLocked: SharedValue<number>;
   charX: SharedValue<number>;
   simTimeMs: SharedValue<number>;
   lastGroundedAtMs: SharedValue<number>;
