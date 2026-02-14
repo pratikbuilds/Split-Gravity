@@ -16,6 +16,7 @@ type LanePattern = {
 type DifficultyLayout = {
   chunkLengthTiles: number;
   lanePattern: LanePattern;
+  laneElevationRows: number[];
   lanePhaseOffset: number;
   middlePillar: {
     widthTiles: number[];
@@ -41,6 +42,7 @@ const CHUNK_LAYOUT: Record<Exclude<Difficulty, 'flat'>, DifficultyLayout> = {
       platformTiles: [8.2, 5.4, 7.6, 5.2],
       gapTiles: [2.3, 2.7, 2.4, 2.8],
     },
+    laneElevationRows: [0, 1, 2, 1, 0, 1],
     lanePhaseOffset: 2,
     middlePillar: {
       widthTiles: [2.8, 3.4],
@@ -57,6 +59,7 @@ const CHUNK_LAYOUT: Record<Exclude<Difficulty, 'flat'>, DifficultyLayout> = {
       platformTiles: [7.4, 4.8, 7.0, 4.6],
       gapTiles: [2.6, 3.0, 2.8, 3.2],
     },
+    laneElevationRows: [0, 1, 2, 1, 0, 2],
     lanePhaseOffset: 2,
     middlePillar: {
       widthTiles: [2.6, 3.1],
@@ -73,6 +76,7 @@ const CHUNK_LAYOUT: Record<Exclude<Difficulty, 'flat'>, DifficultyLayout> = {
       platformTiles: [6.8, 4.2, 6.4, 4.0],
       gapTiles: [3.0, 3.4, 3.2, 3.6],
     },
+    laneElevationRows: [1, 2, 1, 0, 2, 1],
     lanePhaseOffset: 2,
     middlePillar: {
       widthTiles: [2.4, 2.8],
@@ -118,10 +122,11 @@ function clampGap(rawGap: number, tileSize: number): number {
 function appendLaneFromConfig(
   startX: number,
   endX: number,
-  y: number,
+  baseY: number,
   platformHeight: number,
   tileSize: number,
   pattern: LanePattern,
+  elevationRows: number[],
   lane: 'bottom' | 'top',
   phase: number
 ): {
@@ -136,12 +141,18 @@ function appendLaneFromConfig(
   while (cursor < endX - 1) {
     const widthTiles = pattern.platformTiles[stepIndex % pattern.platformTiles.length];
     const gapTiles = pattern.gapTiles[stepIndex % pattern.gapTiles.length];
+    const rawElevationRows = elevationRows[stepIndex % elevationRows.length] ?? 0;
+    const clampedElevationRows = Math.max(0, Math.min(2, Math.round(rawElevationRows)));
+    const elevationPx = clampedElevationRows * tileSize;
+    // Keep stepped surfaces while filling terrain volume back to the base lane.
+    const platformY = lane === 'bottom' ? baseY - elevationPx : baseY;
+    const platformHeightPx = platformHeight + elevationPx;
 
     const rawWidth = widthTiles * tileSize;
     const width = Math.max(MIN_LANDING_WIDTH, Math.min(rawWidth, endX - cursor));
 
     if (width >= MIN_LANDING_WIDTH) {
-      platforms.push(createPlatform(cursor, y, width, platformHeight, lane));
+      platforms.push(createPlatform(cursor, platformY, width, platformHeightPx, lane));
     }
 
     cursor += width;
@@ -292,6 +303,7 @@ function generateChunk(
     platformHeight,
     tileSize,
     layout.lanePattern,
+    layout.laneElevationRows,
     'bottom',
     chunkIndex
   );
@@ -303,6 +315,7 @@ function generateChunk(
     platformHeight,
     tileSize,
     layout.lanePattern,
+    layout.laneElevationRows,
     'top',
     chunkIndex + layout.lanePhaseOffset
   );

@@ -254,6 +254,33 @@ export const useWorldPictures = ({
 
     return createPicture(
       (canvas) => {
+        const solidPlatforms = platforms.filter((platform) => platform.surface !== 'pillar');
+
+        const isSolidAt = (x: number, y: number, current: Platform) => {
+          return solidPlatforms.some((platform) => {
+            if (platform === current) return false;
+            return (
+              x >= platform.x &&
+              x < platform.x + platform.width &&
+              y >= platform.y &&
+              y < platform.y + platform.height
+            );
+          });
+        };
+
+        const hasVerticalContinuationAtSurfaceEdge = (
+          platform: Platform,
+          x: number,
+          y: number,
+          drawWidth: number,
+          edge: 'left' | 'right'
+        ) => {
+          if (platform.surface === 'pillar') return false;
+          const sampleX = edge === 'left' ? x - 0.5 : x + drawWidth + 0.5;
+          const sampleY = platform.surface === 'top' ? y + tileSize + 0.5 : y - 0.5;
+          return isSolidAt(sampleX, sampleY, platform);
+        };
+
         for (const p of platforms) {
           const cols = Math.ceil(p.width / tileSize);
           const rows = Math.ceil(p.height / tileSize);
@@ -263,6 +290,8 @@ export const useWorldPictures = ({
               const remainingWidth = p.width - col * tileSize;
               const drawWidth = Math.min(tileSize, remainingWidth);
               if (drawWidth <= 0) continue;
+              const tileX = Math.floor(p.x + col * tileSize);
+              const tileY = Math.floor(p.y + row * tileSize);
 
               const isOnlyCol = cols === 1;
               const isLeftEdge = col === 0;
@@ -277,24 +306,42 @@ export const useWorldPictures = ({
                   sourceImage = terrainTopImage;
                   srcRect = topSrcRect;
                 } else if (isLeftEdge) {
-                  sourceImage = terrainTopLeftImage;
-                  srcRect = topLeftSrcRect;
+                  if (hasVerticalContinuationAtSurfaceEdge(p, tileX, tileY, drawWidth, 'left')) {
+                    sourceImage = terrainTopImage;
+                    srcRect = topSrcRect;
+                  } else {
+                    sourceImage = terrainTopLeftImage;
+                    srcRect = topLeftSrcRect;
+                  }
                 } else if (isRightEdge) {
-                  sourceImage = terrainTopRightImage;
-                  srcRect = topRightSrcRect;
-                  srcClipAnchor = 'end';
+                  if (hasVerticalContinuationAtSurfaceEdge(p, tileX, tileY, drawWidth, 'right')) {
+                    sourceImage = terrainTopImage;
+                    srcRect = topSrcRect;
+                  } else {
+                    sourceImage = terrainTopRightImage;
+                    srcRect = topRightSrcRect;
+                    srcClipAnchor = 'end';
+                  }
                 } else {
                   sourceImage = terrainTopImage;
                   srcRect = topSrcRect;
                 }
               } else if (!isOnlyCol) {
                 if (isLeftEdge) {
-                  sourceImage = terrainLeftImage;
-                  srcRect = leftSrcRect;
+                  const sideSampleX = tileX - 0.5;
+                  const sideSampleY = tileY + tileSize * 0.5;
+                  if (!isSolidAt(sideSampleX, sideSampleY, p)) {
+                    sourceImage = terrainLeftImage;
+                    srcRect = leftSrcRect;
+                  }
                 } else if (isRightEdge) {
-                  sourceImage = terrainRightImage;
-                  srcRect = rightSrcRect;
-                  srcClipAnchor = 'end';
+                  const sideSampleX = tileX + drawWidth + 0.5;
+                  const sideSampleY = tileY + tileSize * 0.5;
+                  if (!isSolidAt(sideSampleX, sideSampleY, p)) {
+                    sourceImage = terrainRightImage;
+                    srcRect = rightSrcRect;
+                    srcClipAnchor = 'end';
+                  }
                 }
               }
 
@@ -317,13 +364,11 @@ export const useWorldPictures = ({
               }
 
               const clippedSrcRect = getClippedSrcRect(srcRect, drawWidth, srcClipAnchor);
-              const x = Math.floor(p.x + col * tileSize);
-              const y = Math.floor(p.y + row * tileSize);
-              const dst = Skia.XYWHRect(x, y, drawWidth, tileSize);
+              const dst = Skia.XYWHRect(tileX, tileY, drawWidth, tileSize);
               if (p.surface === 'top') {
                 // Ceiling lane should mirror floor orientation.
                 canvas.save();
-                canvas.translate(x, y + tileSize);
+                canvas.translate(tileX, tileY + tileSize);
                 canvas.scale(1, -1);
                 canvas.drawImageRect(
                   sourceImage,

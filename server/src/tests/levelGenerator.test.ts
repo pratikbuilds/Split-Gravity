@@ -117,3 +117,43 @@ test('difficulty progression thresholds are monotonic', () => {
   assert.equal(levelGenerator.getDifficultyForScroll(2500), 'medium');
   assert.equal(levelGenerator.getDifficultyForScroll(5000), 'hard');
 });
+
+test('non-flat chunks include stepped ground elevations up to two rows', () => {
+  const chunks = levelGenerator.preGenerateLevelChunks(
+    SCREEN_WIDTH,
+    SCREEN_HEIGHT,
+    GROUND_Y,
+    TILE_SIZE,
+    4200
+  );
+  const nonFlatPlatforms = chunks
+    .filter((chunk) => chunk.difficulty !== 'flat')
+    .flatMap((chunk) => chunk.platforms);
+  assert.ok(nonFlatPlatforms.length > 0);
+
+  const bottomYs = new Set(
+    nonFlatPlatforms.filter((platform) => platform.surface === 'bottom').map((platform) => platform.y)
+  );
+  assert.ok(bottomYs.has(GROUND_Y), 'expected baseline ground platforms');
+  assert.ok(bottomYs.has(GROUND_Y - TILE_SIZE), 'expected +1 row raised platforms');
+  assert.ok(bottomYs.has(GROUND_Y - TILE_SIZE * 2), 'expected +2 row raised platforms');
+  assert.ok(Math.min(...bottomYs) >= GROUND_Y - TILE_SIZE * 2, 'ground should not rise above 2 rows');
+
+  const topYs = new Set(
+    nonFlatPlatforms.filter((platform) => platform.surface === 'top').map((platform) => platform.y)
+  );
+  assert.ok(topYs.has(0), 'expected ceiling terrain to remain anchored to top edge');
+
+  const topSurfaceYs = new Set(
+    nonFlatPlatforms
+      .filter((platform) => platform.surface === 'top')
+      .map((platform) => platform.y + platform.height)
+  );
+  assert.ok(topSurfaceYs.has(TILE_SIZE * 2), 'expected baseline ceiling collision surface');
+  assert.ok(topSurfaceYs.has(TILE_SIZE * 3), 'expected +1 row lowered ceiling collision surface');
+  assert.ok(topSurfaceYs.has(TILE_SIZE * 4), 'expected +2 row lowered ceiling collision surface');
+  assert.ok(
+    Math.max(...topSurfaceYs) <= TILE_SIZE * 4,
+    'ceiling should not lower by more than 2 rows'
+  );
+});
