@@ -14,6 +14,8 @@ import {
 } from './constants';
 import type { SimulationRefs } from './types';
 
+type SrcClipAnchor = 'start' | 'end';
+
 const TERRAIN_TILE_ASSETS: Record<
   TerrainTheme,
   {
@@ -101,6 +103,13 @@ export const useWorldPictures = ({
   const terrainLeftImage = useImage(terrainAssets.left);
   const terrainCenterImage = useImage(terrainAssets.center);
   const terrainRightImage = useImage(terrainAssets.right);
+  const middlePlatformLeftImage = useImage(require('../../assets/platform assets/Tiles/tile_0048.png'));
+  const middlePlatformCenterImage = useImage(
+    require('../../assets/platform assets/Tiles/tile_0049.png')
+  );
+  const middlePlatformRightImage = useImage(
+    require('../../assets/platform assets/Tiles/tile_0050.png')
+  );
   const characterImage = useImage(
     require('../../assets/platform assets/Tilemap/tilemap-characters_packed.png')
   );
@@ -180,6 +189,9 @@ export const useWorldPictures = ({
       !terrainLeftImage ||
       !terrainCenterImage ||
       !terrainRightImage ||
+      !middlePlatformLeftImage ||
+      !middlePlatformCenterImage ||
+      !middlePlatformRightImage ||
       width <= 0 ||
       height <= 0 ||
       platforms.length === 0
@@ -208,13 +220,41 @@ export const useWorldPictures = ({
       terrainCenterImage.width(),
       terrainCenterImage.height()
     );
+    const middleLeftSrcRect = Skia.XYWHRect(
+      0,
+      0,
+      middlePlatformLeftImage.width(),
+      middlePlatformLeftImage.height()
+    );
+    const middleCenterSrcRect = Skia.XYWHRect(
+      0,
+      0,
+      middlePlatformCenterImage.width(),
+      middlePlatformCenterImage.height()
+    );
+    const middleRightSrcRect = Skia.XYWHRect(
+      0,
+      0,
+      middlePlatformRightImage.width(),
+      middlePlatformRightImage.height()
+    );
     const rightSrcRect = Skia.XYWHRect(0, 0, terrainRightImage.width(), terrainRightImage.height());
     const margin = tileSize * 2;
     const maxX = Math.max(...platforms.map((p) => p.x + p.width), width * 3) + margin;
+
+    const getClippedSrcRect = (
+      srcRect: ReturnType<typeof Skia.XYWHRect>,
+      drawWidth: number,
+      anchor: SrcClipAnchor
+    ) => {
+      const srcWidth = (drawWidth / tileSize) * srcRect.width;
+      const srcX = anchor === 'end' ? srcRect.x + (srcRect.width - srcWidth) : srcRect.x;
+      return Skia.XYWHRect(srcX, srcRect.y, srcWidth, srcRect.height);
+    };
+
     return createPicture(
       (canvas) => {
         for (const p of platforms) {
-          const y = Math.round(p.y);
           const cols = Math.ceil(p.width / tileSize);
           const rows = Math.ceil(p.height / tileSize);
           for (let row = 0; row < rows; row++) {
@@ -230,6 +270,7 @@ export const useWorldPictures = ({
 
               let sourceImage = terrainCenterImage;
               let srcRect = centerSrcRect;
+              let srcClipAnchor: SrcClipAnchor = 'start';
 
               if (isSurface || (p.surface === 'pillar' && row === 0)) {
                 if (isOnlyCol) {
@@ -241,6 +282,7 @@ export const useWorldPictures = ({
                 } else if (isRightEdge) {
                   sourceImage = terrainTopRightImage;
                   srcRect = topRightSrcRect;
+                  srcClipAnchor = 'end';
                 } else {
                   sourceImage = terrainTopImage;
                   srcRect = topSrcRect;
@@ -252,11 +294,29 @@ export const useWorldPictures = ({
                 } else if (isRightEdge) {
                   sourceImage = terrainRightImage;
                   srcRect = rightSrcRect;
+                  srcClipAnchor = 'end';
                 }
               }
 
-              const srcWidth = (drawWidth / tileSize) * srcRect.width;
-              const clippedSrcRect = Skia.XYWHRect(srcRect.x, srcRect.y, srcWidth, srcRect.height);
+              // Middle lane uses fixed left/center/right tiles for stretchable platforms.
+              if (p.surface === 'pillar') {
+                if (isOnlyCol) {
+                  sourceImage = middlePlatformCenterImage;
+                  srcRect = middleCenterSrcRect;
+                } else if (isLeftEdge) {
+                  sourceImage = middlePlatformLeftImage;
+                  srcRect = middleLeftSrcRect;
+                } else if (isRightEdge) {
+                  sourceImage = middlePlatformRightImage;
+                  srcRect = middleRightSrcRect;
+                  srcClipAnchor = 'end';
+                } else {
+                  sourceImage = middlePlatformCenterImage;
+                  srcRect = middleCenterSrcRect;
+                }
+              }
+
+              const clippedSrcRect = getClippedSrcRect(srcRect, drawWidth, srcClipAnchor);
               const x = Math.floor(p.x + col * tileSize);
               const y = Math.floor(p.y + row * tileSize);
               const dst = Skia.XYWHRect(x, y, drawWidth, tileSize);
@@ -284,6 +344,9 @@ export const useWorldPictures = ({
   }, [
     terrainCenterImage,
     terrainLeftImage,
+    middlePlatformCenterImage,
+    middlePlatformLeftImage,
+    middlePlatformRightImage,
     terrainRightImage,
     terrainTopImage,
     terrainTopLeftImage,

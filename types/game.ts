@@ -46,7 +46,12 @@ export interface MultiplayerResult {
   endedAt: number;
 }
 
-export type GameAudioEvent = 'flip' | 'game_over' | 'run_start' | 'land' | 'near_miss';
+export type GameAudioEvent =
+  | 'flip'
+  | 'countdown_tick'
+  | 'game_over'
+  | 'land'
+  | 'near_miss';
 
 // Reachability constants (tune from physics)
 export const MAX_FLIP_HORIZONTAL = 120; // px horizontal distance per flip arc

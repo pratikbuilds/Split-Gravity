@@ -2,14 +2,14 @@ import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import type { AVPlaybackSource } from 'expo-av';
 import type { GameAudioEvent } from '../types/game';
 
-export type SoundKey = 'flip' | 'gameOver' | 'runStart' | 'land' | 'nearMiss';
+export type SoundKey = 'flip' | 'countdownTick' | 'gameOver' | 'land' | 'nearMiss';
 
 export type LoadedSounds = Record<SoundKey, Audio.Sound>;
 
 const SOUND_SOURCES: Record<SoundKey, AVPlaybackSource> = {
-  flip: require('../assets/audio/sfx/flip_gravity.wav'),
+  flip: require('../assets/audio/sfx/sfx_jump.ogg'),
+  countdownTick: require('../assets/audio/sfx/sfx_select.ogg'),
   gameOver: require('../assets/audio/sfx/game_over_stinger.wav'),
-  runStart: require('../assets/audio/sfx/run_start_whoosh.wav'),
   land: require('../assets/audio/sfx/land_thud.wav'),
   nearMiss: require('../assets/audio/sfx/near_miss_swoosh.wav'),
 };
@@ -56,10 +56,10 @@ export function mapGameEventToSound(event: GameAudioEvent): SoundKey {
   switch (event) {
     case 'flip':
       return 'flip';
+    case 'countdown_tick':
+      return 'countdownTick';
     case 'game_over':
       return 'gameOver';
-    case 'run_start':
-      return 'runStart';
     case 'land':
       return 'land';
     case 'near_miss':

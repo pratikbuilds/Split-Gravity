@@ -7,67 +7,87 @@ import {
 } from '../types/game';
 
 type Difficulty = 'flat' | 'easy' | 'medium' | 'hard';
-type StepPattern = {
-  bottomWidthTiles: number;
-  bottomGapTiles: number;
-  topWidthTiles: number;
-  topGapTiles: number;
-};
-type MidStepPattern = {
-  widthTiles: number;
-  gapTiles: number;
-  lane: 0 | 1 | 2;
+
+type LanePattern = {
+  platformTiles: number[];
+  gapTiles: number[];
 };
 
-const CHUNK_LENGTH_TILES: Record<Exclude<Difficulty, 'flat'>, number> = {
-  easy: 18,
-  medium: 20,
-  hard: 22,
+type DifficultyLayout = {
+  chunkLengthTiles: number;
+  lanePattern: LanePattern;
+  lanePhaseOffset: number;
+  middlePillar: {
+    widthTiles: number[];
+    extensionTiles: number;
+    maxSpanTiles: number;
+    topGapY: number;
+    bottomGapY: number;
+    minSpacingTiles: number;
+  };
+};
+
+type GapWindow = {
+  startX: number;
+  endX: number;
+  lane: 'top' | 'bottom';
+};
+
+const CHUNK_LAYOUT: Record<Exclude<Difficulty, 'flat'>, DifficultyLayout> = {
+  easy: {
+    chunkLengthTiles: 18,
+    lanePattern: {
+      // Long wall runs with short openings, matching the reference layout cadence.
+      platformTiles: [8.2, 5.4, 7.6, 5.2],
+      gapTiles: [2.3, 2.7, 2.4, 2.8],
+    },
+    lanePhaseOffset: 2,
+    middlePillar: {
+      widthTiles: [2.8, 3.4],
+      extensionTiles: 1.25,
+      maxSpanTiles: 6.8,
+      topGapY: 0.3,
+      bottomGapY: 0.72,
+      minSpacingTiles: 4.5,
+    },
+  },
+  medium: {
+    chunkLengthTiles: 20,
+    lanePattern: {
+      platformTiles: [7.4, 4.8, 7.0, 4.6],
+      gapTiles: [2.6, 3.0, 2.8, 3.2],
+    },
+    lanePhaseOffset: 2,
+    middlePillar: {
+      widthTiles: [2.6, 3.1],
+      extensionTiles: 1.35,
+      maxSpanTiles: 6.4,
+      topGapY: 0.28,
+      bottomGapY: 0.74,
+      minSpacingTiles: 4.0,
+    },
+  },
+  hard: {
+    chunkLengthTiles: 22,
+    lanePattern: {
+      platformTiles: [6.8, 4.2, 6.4, 4.0],
+      gapTiles: [3.0, 3.4, 3.2, 3.6],
+    },
+    lanePhaseOffset: 2,
+    middlePillar: {
+      widthTiles: [2.4, 2.8],
+      extensionTiles: 1.45,
+      maxSpanTiles: 6.0,
+      topGapY: 0.26,
+      bottomGapY: 0.76,
+      minSpacingTiles: 3.8,
+    },
+  },
 };
 
 function chunkIdFor(startX: number, difficulty: Difficulty): string {
   return `chunk_${difficulty}_${Math.round(startX)}`;
 }
-
-// Deterministic handcrafted patterns (no random generation).
-// Pattern alternates long/short ledges so they look like side extensions.
-const PATTERNS: Record<Exclude<Difficulty, 'flat'>, StepPattern[]> = {
-  easy: [
-    { bottomWidthTiles: 6, bottomGapTiles: 2.2, topWidthTiles: 4, topGapTiles: 1.6 },
-    { bottomWidthTiles: 4, bottomGapTiles: 1.7, topWidthTiles: 6, topGapTiles: 2.4 },
-    { bottomWidthTiles: 5, bottomGapTiles: 2.1, topWidthTiles: 4, topGapTiles: 1.8 },
-    { bottomWidthTiles: 4, bottomGapTiles: 1.8, topWidthTiles: 5, topGapTiles: 2.2 },
-  ],
-  medium: [
-    { bottomWidthTiles: 5, bottomGapTiles: 2.6, topWidthTiles: 4, topGapTiles: 1.9 },
-    { bottomWidthTiles: 4, bottomGapTiles: 2.1, topWidthTiles: 5, topGapTiles: 2.7 },
-    { bottomWidthTiles: 4, bottomGapTiles: 2.8, topWidthTiles: 4, topGapTiles: 2.0 },
-    { bottomWidthTiles: 5, bottomGapTiles: 2.2, topWidthTiles: 4, topGapTiles: 2.9 },
-  ],
-  hard: [
-    { bottomWidthTiles: 4, bottomGapTiles: 3.0, topWidthTiles: 4, topGapTiles: 2.2 },
-    { bottomWidthTiles: 4, bottomGapTiles: 2.4, topWidthTiles: 4, topGapTiles: 3.1 },
-    { bottomWidthTiles: 4, bottomGapTiles: 3.2, topWidthTiles: 5, topGapTiles: 2.3 },
-    { bottomWidthTiles: 5, bottomGapTiles: 2.2, topWidthTiles: 4, topGapTiles: 3.0 },
-  ],
-};
-const MID_PATTERNS: Record<Exclude<Difficulty, 'flat'>, MidStepPattern[]> = {
-  easy: [
-    { widthTiles: 3.5, gapTiles: 6.2, lane: 1 },
-    { widthTiles: 3.0, gapTiles: 5.8, lane: 0 },
-    { widthTiles: 4.0, gapTiles: 6.6, lane: 2 },
-  ],
-  medium: [
-    { widthTiles: 3.0, gapTiles: 5.0, lane: 1 },
-    { widthTiles: 2.8, gapTiles: 4.6, lane: 0 },
-    { widthTiles: 3.4, gapTiles: 5.4, lane: 2 },
-  ],
-  hard: [
-    { widthTiles: 2.8, gapTiles: 4.4, lane: 1 },
-    { widthTiles: 2.6, gapTiles: 4.0, lane: 0 },
-    { widthTiles: 3.1, gapTiles: 4.8, lane: 2 },
-  ],
-};
 
 function createPlatform(
   x: number,
@@ -90,51 +110,67 @@ function getChunkEndX(chunk: Chunk): number {
   return Math.max(...chunk.platforms.map((p) => p.x + p.width));
 }
 
-function appendLaneFromPattern(
+function clampGap(rawGap: number, tileSize: number): number {
+  const minPlayableGap = tileSize * 2.2;
+  return Math.max(minPlayableGap, Math.min(rawGap, MAX_FLIP_HORIZONTAL - SAFE_MARGIN));
+}
+
+function appendLaneFromConfig(
   startX: number,
   endX: number,
   y: number,
   platformHeight: number,
   tileSize: number,
-  pattern: StepPattern[],
+  pattern: LanePattern,
   lane: 'bottom' | 'top',
-  chunkIndex: number
-): Platform[] {
+  phase: number
+): {
+  platforms: Platform[];
+  gaps: GapWindow[];
+} {
   const platforms: Platform[] = [];
+  const gaps: GapWindow[] = [];
   let cursor = startX;
-  let stepIndex = chunkIndex % pattern.length;
+  let stepIndex = phase;
 
-  while (cursor < endX - MIN_LANDING_WIDTH) {
-    const step = pattern[stepIndex % pattern.length];
-    const rawWidth =
-      lane === 'bottom' ? step.bottomWidthTiles * tileSize : step.topWidthTiles * tileSize;
-    const rawGap = lane === 'bottom' ? step.bottomGapTiles * tileSize : step.topGapTiles * tileSize;
-    const minPlayableGap = tileSize * 2.25;
-    const clampedGap = Math.max(
-      minPlayableGap,
-      Math.min(rawGap, MAX_FLIP_HORIZONTAL - SAFE_MARGIN)
-    );
+  while (cursor < endX - 1) {
+    const widthTiles = pattern.platformTiles[stepIndex % pattern.platformTiles.length];
+    const gapTiles = pattern.gapTiles[stepIndex % pattern.gapTiles.length];
+
+    const rawWidth = widthTiles * tileSize;
     const width = Math.max(MIN_LANDING_WIDTH, Math.min(rawWidth, endX - cursor));
 
     if (width >= MIN_LANDING_WIDTH) {
       platforms.push(createPlatform(cursor, y, width, platformHeight, lane));
     }
 
-    cursor += width + clampedGap;
+    cursor += width;
+    if (cursor >= endX) break;
+
+    const rawGap = gapTiles * tileSize;
+    const gapLength = clampGap(rawGap, tileSize);
+    const gapStartX = cursor;
+    const gapEndX = Math.min(endX, cursor + gapLength);
+
+    if (gapEndX > gapStartX) {
+      gaps.push({ startX: gapStartX, endX: gapEndX, lane });
+    }
+
+    cursor = gapEndX;
     stepIndex += 1;
   }
 
-  return platforms;
+  return { platforms, gaps };
 }
 
-function appendMiddlePlatformsFromPattern(
+function appendMiddlePlatformsFromGaps(
   startX: number,
   endX: number,
   groundY: number,
-  platformHeight: number,
   tileSize: number,
-  pattern: MidStepPattern[],
-  chunkIndex: number
+  gaps: GapWindow[],
+  layout: DifficultyLayout,
+  phase: number
 ): Platform[] {
   const platforms: Platform[] = [];
   const topBuffer = tileSize * 3;
@@ -144,27 +180,39 @@ function appendMiddlePlatformsFromPattern(
   if (laneBottom <= laneTop) return platforms;
 
   const middleSpan = laneBottom - laneTop;
-  const laneYs = [
-    Math.round(laneTop + middleSpan * 0.18),
-    Math.round(laneTop + middleSpan * 0.5),
-    Math.round(laneTop + middleSpan * 0.82),
-  ] as const;
+  const yForGap = (lane: GapWindow['lane']) => {
+    const ratio = lane === 'top' ? layout.middlePillar.topGapY : layout.middlePillar.bottomGapY;
+    return Math.round(laneTop + middleSpan * ratio);
+  };
 
-  let cursor = startX + tileSize * 1.5;
-  let stepIndex = chunkIndex % pattern.length;
-  while (cursor < endX - MIN_LANDING_WIDTH) {
-    const step = pattern[stepIndex % pattern.length];
-    const rawWidth = step.widthTiles * tileSize;
-    const rawGap = step.gapTiles * tileSize;
-    const width = Math.max(MIN_LANDING_WIDTH, Math.min(rawWidth, endX - cursor));
-    const gap = Math.max(tileSize * 2.2, Math.min(rawGap, MAX_FLIP_HORIZONTAL + tileSize));
+  const sortedGaps = [...gaps]
+    .filter((gap) => gap.endX > startX && gap.startX < endX)
+    .sort((a, b) => a.startX - b.startX);
 
-    if (width >= MIN_LANDING_WIDTH) {
-      platforms.push(createPlatform(cursor, laneYs[step.lane], width, platformHeight, 'pillar'));
-    }
+  const minSpacing = layout.middlePillar.minSpacingTiles * tileSize;
+  let lastPillarX = -Infinity;
 
-    cursor += width + gap;
-    stepIndex += 1;
+  for (let i = 0; i < sortedGaps.length; i += 1) {
+    const gap = sortedGaps[i];
+    const gapWidth = gap.endX - gap.startX;
+
+    const widthTiles =
+      layout.middlePillar.widthTiles[(phase + i) % layout.middlePillar.widthTiles.length];
+    const extension = layout.middlePillar.extensionTiles * tileSize;
+    const targetWidth = Math.max(widthTiles * tileSize, gapWidth + extension * 2);
+    const width = Math.max(
+      MIN_LANDING_WIDTH,
+      Math.min(targetWidth, layout.middlePillar.maxSpanTiles * tileSize)
+    );
+    if (width < MIN_LANDING_WIDTH) continue;
+
+    const centerX = gap.startX + gapWidth * 0.5;
+    const unclampedX = centerX - width * 0.5;
+    const x = Math.max(startX, Math.min(unclampedX, endX - width));
+    if (x - lastPillarX < minSpacing) continue;
+
+    platforms.push(createPlatform(x, yForGap(gap.lane), width, tileSize, 'pillar'));
+    lastPillarX = x;
   }
 
   return platforms;
@@ -232,42 +280,44 @@ function generateChunk(
     };
   }
 
-  const chunkLength = CHUNK_LENGTH_TILES[difficulty] * tileSize;
+  const layout = CHUNK_LAYOUT[difficulty];
+  const chunkLength = layout.chunkLengthTiles * tileSize;
   const endX = startX + chunkLength;
   const chunkIndex = Math.floor(startX / chunkLength);
-  const pattern = PATTERNS[difficulty];
 
-  const bottomPlatforms = appendLaneFromPattern(
+  const bottomLane = appendLaneFromConfig(
     startX,
     endX,
     groundY,
     platformHeight,
     tileSize,
-    pattern,
+    layout.lanePattern,
     'bottom',
     chunkIndex
   );
-  const topPlatforms = appendLaneFromPattern(
+
+  const topLane = appendLaneFromConfig(
     startX,
     endX,
     0,
     platformHeight,
     tileSize,
-    pattern,
+    layout.lanePattern,
     'top',
-    chunkIndex + 2
+    chunkIndex + layout.lanePhaseOffset
   );
-  const middlePlatforms = appendMiddlePlatformsFromPattern(
+
+  const middlePlatforms = appendMiddlePlatformsFromGaps(
     startX,
     endX,
     groundY,
-    platformHeight,
     tileSize,
-    MID_PATTERNS[difficulty],
+    [...bottomLane.gaps, ...topLane.gaps],
+    layout,
     chunkIndex + 1
   );
 
-  platforms.push(...bottomPlatforms, ...topPlatforms, ...middlePlatforms);
+  platforms.push(...bottomLane.platforms, ...topLane.platforms, ...middlePlatforms);
   ensureSharedCoverage(platforms, startX, endX, groundY, tileSize);
 
   return {

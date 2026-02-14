@@ -181,17 +181,20 @@ export const GameCanvas = ({
     refs.initialized.value = 0;
     refs.velocityX.value = 0;
     setCountdownDigit(3);
+    triggerAudioEvent('countdown_tick');
 
     let nextDigit: 3 | 2 | 1 | null = 3;
     const timer = setInterval(() => {
       if (nextDigit === 3) {
         nextDigit = 2;
         setCountdownDigit(2);
+        triggerAudioEvent('countdown_tick');
         return;
       }
       if (nextDigit === 2) {
         nextDigit = 1;
         setCountdownDigit(1);
+        triggerAudioEvent('countdown_tick');
         return;
       }
       clearInterval(timer);
@@ -199,13 +202,12 @@ export const GameCanvas = ({
       setCountdownDigit(null);
       countdownLocked.value = 0;
       refs.initialized.value = 1;
-      triggerAudioEvent('run_start');
     }, 1000);
 
     return () => {
       clearInterval(timer);
     };
-  }, [countdownLocked, refs.initialized, refs.velocityX, triggerAudioEvent]);
+  }, [countdownLocked, refs.initialized, refs.velocityX]);
 
   const countdownImageSource = useMemo(() => {
     if (countdownDigit === 1) {
