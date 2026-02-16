@@ -12,7 +12,8 @@ export interface Chunk {
   id: string;
   width: number;
   platforms: Platform[];
-  difficulty: 'flat' | 'easy' | 'medium' | 'hard';
+  challenge: number;
+  phase: 'intro' | 'main' | 'recovery';
 }
 
 export interface GameResult {

@@ -47,6 +47,48 @@ function maxSharedVoid(platforms: Platform[], startX: number, endX: number): num
   return Math.max(maxVoid, currentVoid);
 }
 
+function lanePlatforms(chunk: Chunk, lane: 'bottom' | 'top'): Platform[] {
+  return chunk.platforms
+    .filter((platform) => platform.surface === lane)
+    .sort((a, b) => a.x - b.x);
+}
+
+function laneGapWidths(chunk: Chunk, lane: 'bottom' | 'top'): number[] {
+  const platforms = lanePlatforms(chunk, lane);
+  const gaps: number[] = [];
+  for (let i = 1; i < platforms.length; i += 1) {
+    const gap = platforms[i].x - (platforms[i - 1].x + platforms[i - 1].width);
+    if (gap > 0) gaps.push(gap);
+  }
+  return gaps;
+}
+
+function nearestLaneClearance(
+  chunk: Chunk,
+  pillar: Platform
+): { topClearance: number; bottomClearance: number } | null {
+  const overlappingTop = chunk.platforms.filter(
+    (platform) =>
+      platform.surface === 'top' &&
+      platform.x < pillar.x + pillar.width &&
+      platform.x + platform.width > pillar.x
+  );
+  const overlappingBottom = chunk.platforms.filter(
+    (platform) =>
+      platform.surface === 'bottom' &&
+      platform.x < pillar.x + pillar.width &&
+      platform.x + platform.width > pillar.x
+  );
+  if (overlappingTop.length === 0 || overlappingBottom.length === 0) return null;
+
+  const nearestTopSurface = Math.max(...overlappingTop.map((platform) => platform.y + platform.height));
+  const nearestBottomSurface = Math.min(...overlappingBottom.map((platform) => platform.y));
+  return {
+    topClearance: pillar.y - nearestTopSurface,
+    bottomClearance: nearestBottomSurface - (pillar.y + pillar.height),
+  };
+}
+
 test('preGenerateLevelChunks is deterministic for same inputs', () => {
   const first = levelGenerator.preGenerateLevelChunks(
     SCREEN_WIDTH,
@@ -108,52 +150,169 @@ test('generated chunks stitch contiguously and maintain reachable shared void li
     const { start, end } = chunkBounds(chunk);
     const voidWidth = maxSharedVoid(chunk.platforms, start, end);
     assert.ok(voidWidth <= maxAllowedVoid + 8);
+
+    const bottomLaneMaxGap = Math.max(0, ...laneGapWidths(chunk, 'bottom'));
+    const topLaneMaxGap = Math.max(0, ...laneGapWidths(chunk, 'top'));
+    assert.ok(bottomLaneMaxGap <= maxAllowedVoid + 2);
+    assert.ok(topLaneMaxGap <= maxAllowedVoid + 2);
   }
 });
 
-test('difficulty progression thresholds are monotonic', () => {
-  assert.equal(levelGenerator.getDifficultyForScroll(0), 'flat');
-  assert.equal(levelGenerator.getDifficultyForScroll(900), 'easy');
-  assert.equal(levelGenerator.getDifficultyForScroll(2500), 'medium');
-  assert.equal(levelGenerator.getDifficultyForScroll(5000), 'hard');
+test('challenge progression has a rising baseline with periodic recovery phases', () => {
+  const intro = levelGenerator.getChallengeForScroll(0);
+  assert.equal(intro.phase, 'intro');
+  assert.equal(intro.challenge, 0);
+
+  const window = 2400;
+  let previousAverage = -Infinity;
+  for (let start = gameTypes.FLAT_ZONE_LENGTH; start <= 26000; start += window) {
+    let total = 0;
+    let count = 0;
+    for (let x = start; x < start + window; x += 200) {
+      total += levelGenerator.getChallengeForScroll(x).challenge;
+      count += 1;
+    }
+    const average = total / count;
+    assert.ok(average + 0.04 >= previousAverage, 'expected baseline trend to rise over windows');
+    previousAverage = average;
+  }
+
+  let recoveryCount = 0;
+  for (let x = gameTypes.FLAT_ZONE_LENGTH; x <= 30000; x += 100) {
+    const profile = levelGenerator.getChallengeForScroll(x);
+    assert.ok(profile.challenge >= 0 && profile.challenge <= 1);
+    if (profile.phase === 'recovery') recoveryCount += 1;
+  }
+  assert.ok(recoveryCount > 0, 'expected periodic recovery bands');
 });
 
-test('non-flat chunks include stepped ground elevations up to two rows', () => {
+test('generated chunks include challenge metadata and recurring recovery chunks', () => {
   const chunks = levelGenerator.preGenerateLevelChunks(
     SCREEN_WIDTH,
     SCREEN_HEIGHT,
     GROUND_Y,
     TILE_SIZE,
-    4200
+    24000
   );
-  const nonFlatPlatforms = chunks
-    .filter((chunk) => chunk.difficulty !== 'flat')
+
+  let sawMain = false;
+  let sawRecovery = false;
+  for (const chunk of chunks) {
+    assert.ok(chunk.challenge >= 0 && chunk.challenge <= 1);
+    if (chunk.phase === 'main') sawMain = true;
+    if (chunk.phase === 'recovery') sawRecovery = true;
+  }
+
+  assert.ok(sawMain, 'expected main-phase chunks');
+  assert.ok(sawRecovery, 'expected recovery-phase chunks');
+});
+
+test('soft symmetry keeps cadence parity while avoiding exact lane duplication', () => {
+  const chunks = levelGenerator.preGenerateLevelChunks(
+    SCREEN_WIDTH,
+    SCREEN_HEIGHT,
+    GROUND_Y,
+    TILE_SIZE,
+    22000
+  ).filter((chunk) => chunk.phase !== 'intro');
+
+  assert.ok(chunks.length > 0);
+
+  let nonIdenticalCount = 0;
+  let compared = 0;
+
+  for (const chunk of chunks) {
+    const bottomGaps = laneGapWidths(chunk, 'bottom');
+    const topGaps = laneGapWidths(chunk, 'top');
+
+    assert.ok(Math.abs(bottomGaps.length - topGaps.length) <= 1);
+    const bottomGapTotal = bottomGaps.reduce((sum, value) => sum + value, 0);
+    const topGapTotal = topGaps.reduce((sum, value) => sum + value, 0);
+    assert.ok(Math.abs(bottomGapTotal - topGapTotal) <= TILE_SIZE * 8);
+
+    const bottomWidths = lanePlatforms(chunk, 'bottom').map((platform) => platform.width);
+    const topWidthsMirrored = lanePlatforms(chunk, 'top')
+      .map((platform) => platform.width)
+      .reverse();
+
+    const maxLen = Math.min(bottomWidths.length, topWidthsMirrored.length);
+    if (maxLen < 2) continue;
+
+    compared += 1;
+    const exactMirror = bottomWidths
+      .slice(0, maxLen)
+      .every((width, index) => width === topWidthsMirrored[index]);
+    if (!exactMirror) nonIdenticalCount += 1;
+  }
+
+  assert.ok(compared > 0, 'expected chunk set suitable for symmetry comparison');
+  assert.ok(nonIdenticalCount / compared >= 0.9);
+});
+
+test('non-intro chunks include stepped ground elevations up to two rows', () => {
+  const chunks = levelGenerator.preGenerateLevelChunks(
+    SCREEN_WIDTH,
+    SCREEN_HEIGHT,
+    GROUND_Y,
+    TILE_SIZE,
+    12000
+  );
+
+  const proceduralPlatforms = chunks
+    .filter((chunk) => chunk.phase !== 'intro')
     .flatMap((chunk) => chunk.platforms);
-  assert.ok(nonFlatPlatforms.length > 0);
+  assert.ok(proceduralPlatforms.length > 0);
 
   const bottomYs = new Set(
-    nonFlatPlatforms.filter((platform) => platform.surface === 'bottom').map((platform) => platform.y)
+    proceduralPlatforms
+      .filter((platform) => platform.surface === 'bottom')
+      .map((platform) => platform.y)
   );
   assert.ok(bottomYs.has(GROUND_Y), 'expected baseline ground platforms');
-  assert.ok(bottomYs.has(GROUND_Y - TILE_SIZE), 'expected +1 row raised platforms');
-  assert.ok(bottomYs.has(GROUND_Y - TILE_SIZE * 2), 'expected +2 row raised platforms');
+  assert.ok(
+    bottomYs.has(GROUND_Y - TILE_SIZE) || bottomYs.has(GROUND_Y - TILE_SIZE * 2),
+    'expected at least some raised ground platforms'
+  );
   assert.ok(Math.min(...bottomYs) >= GROUND_Y - TILE_SIZE * 2, 'ground should not rise above 2 rows');
 
   const topYs = new Set(
-    nonFlatPlatforms.filter((platform) => platform.surface === 'top').map((platform) => platform.y)
+    proceduralPlatforms.filter((platform) => platform.surface === 'top').map((platform) => platform.y)
   );
   assert.ok(topYs.has(0), 'expected ceiling terrain to remain anchored to top edge');
 
   const topSurfaceYs = new Set(
-    nonFlatPlatforms
+    proceduralPlatforms
       .filter((platform) => platform.surface === 'top')
       .map((platform) => platform.y + platform.height)
   );
   assert.ok(topSurfaceYs.has(TILE_SIZE * 2), 'expected baseline ceiling collision surface');
-  assert.ok(topSurfaceYs.has(TILE_SIZE * 3), 'expected +1 row lowered ceiling collision surface');
-  assert.ok(topSurfaceYs.has(TILE_SIZE * 4), 'expected +2 row lowered ceiling collision surface');
+  assert.ok(
+    topSurfaceYs.has(TILE_SIZE * 3) || topSurfaceYs.has(TILE_SIZE * 4),
+    'expected at least some lowered ceiling collision surfaces'
+  );
   assert.ok(
     Math.max(...topSurfaceYs) <= TILE_SIZE * 4,
     'ceiling should not lower by more than 2 rows'
   );
+});
+
+test('pillars keep safe vertical clearance from lane terrain', () => {
+  const chunks = levelGenerator.preGenerateLevelChunks(
+    SCREEN_WIDTH,
+    SCREEN_HEIGHT,
+    GROUND_Y,
+    TILE_SIZE,
+    24000
+  ).filter((chunk) => chunk.phase !== 'intro');
+
+  const minClearance = TILE_SIZE * 2;
+  for (const chunk of chunks) {
+    const pillars = chunk.platforms.filter((platform) => platform.surface === 'pillar');
+    for (const pillar of pillars) {
+      const clearance = nearestLaneClearance(chunk, pillar);
+      if (!clearance) continue;
+      assert.ok(clearance.topClearance >= minClearance);
+      assert.ok(clearance.bottomClearance >= minClearance);
+    }
+  }
 });

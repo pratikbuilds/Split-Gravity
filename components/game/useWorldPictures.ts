@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Skia, createPicture, rect, useImage, useRSXformBuffer } from '@shopify/react-native-skia';
 import { useDerivedValue } from 'react-native-reanimated';
 import type { Platform, TerrainTheme } from '../../types/game';
+import { isSurfaceEdgeGap } from '../../shared/game/terrainAutotile';
 import { GAME_BACKGROUNDS } from '../../utils/backgrounds';
 import {
   BACKGROUND_SCROLL_FACTOR,
@@ -268,19 +269,6 @@ export const useWorldPictures = ({
           });
         };
 
-        const hasVerticalContinuationAtSurfaceEdge = (
-          platform: Platform,
-          x: number,
-          y: number,
-          drawWidth: number,
-          edge: 'left' | 'right'
-        ) => {
-          if (platform.surface === 'pillar') return false;
-          const sampleX = edge === 'left' ? x - 0.5 : x + drawWidth + 0.5;
-          const sampleY = platform.surface === 'top' ? y + tileSize + 0.5 : y - 0.5;
-          return isSolidAt(sampleX, sampleY, platform);
-        };
-
         for (const p of platforms) {
           const cols = Math.ceil(p.width / tileSize);
           const rows = Math.ceil(p.height / tileSize);
@@ -306,21 +294,37 @@ export const useWorldPictures = ({
                   sourceImage = terrainTopImage;
                   srcRect = topSrcRect;
                 } else if (isLeftEdge) {
-                  if (hasVerticalContinuationAtSurfaceEdge(p, tileX, tileY, drawWidth, 'left')) {
-                    sourceImage = terrainTopImage;
-                    srcRect = topSrcRect;
-                  } else {
+                  const hasGap = isSurfaceEdgeGap({
+                    tileX,
+                    tileY,
+                    drawWidth,
+                    tileSize,
+                    edge: 'left',
+                    isSolidAt: (x, y) => isSolidAt(x, y, p),
+                  });
+                  if (hasGap) {
                     sourceImage = terrainTopLeftImage;
                     srcRect = topLeftSrcRect;
-                  }
-                } else if (isRightEdge) {
-                  if (hasVerticalContinuationAtSurfaceEdge(p, tileX, tileY, drawWidth, 'right')) {
+                  } else {
                     sourceImage = terrainTopImage;
                     srcRect = topSrcRect;
-                  } else {
+                  }
+                } else if (isRightEdge) {
+                  const hasGap = isSurfaceEdgeGap({
+                    tileX,
+                    tileY,
+                    drawWidth,
+                    tileSize,
+                    edge: 'right',
+                    isSolidAt: (x, y) => isSolidAt(x, y, p),
+                  });
+                  if (hasGap) {
                     sourceImage = terrainTopRightImage;
                     srcRect = topRightSrcRect;
                     srcClipAnchor = 'end';
+                  } else {
+                    sourceImage = terrainTopImage;
+                    srcRect = topSrcRect;
                   }
                 } else {
                   sourceImage = terrainTopImage;
