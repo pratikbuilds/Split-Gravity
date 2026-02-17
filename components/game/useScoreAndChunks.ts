@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAnimatedReaction, useSharedValue } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 import type { Chunk } from '../../types/game';
-import { generateLevelChunks, preGenerateLevelChunks } from '../../utils/levelGenerator';
+import { generateLevelChunks, preGenerateLevelChunks } from '../../utils/levelGeneratorSections';
 import { CHAR_SCALE, CHAR_SIZE, PLAYER_X_FACTOR, groundHeight, tileSize } from './constants';
 import type { SimulationRefs } from './types';
 
@@ -76,7 +76,8 @@ export const useScoreAndChunks = ({
     lastSpawnAt.value = 0;
     lastScoreAt.value = 0;
 
-    const initialChunks = preGenerateLevelChunks(width, height, groundY, tileSize);
+    const config = { groundY, tileSize, screenWidth: width };
+    const initialChunks = preGenerateLevelChunks(config);
     setChunks(initialChunks);
     setScore(0);
   }, [groundY, height, initialGravityDirection, lastScoreAt, lastSpawnAt, refs, width]);
@@ -98,14 +99,15 @@ export const useScoreAndChunks = ({
     lastSpawnRef.current = scroll + 200;
 
     const currentChunks = chunksRef.current;
-    const newChunks = generateLevelChunks(scroll, width, height, groundY, tileSize, currentChunks);
+    const config = { groundY, tileSize, screenWidth: width };
+    const newChunks = generateLevelChunks(config, scroll, currentChunks);
     const chunksChanged =
       newChunks.length !== currentChunks.length ||
       newChunks.some((chunk, index) => currentChunks[index]?.id !== chunk.id);
     if (chunksChanged) {
       setChunks(newChunks);
     }
-  }, [groundY, height, refs.totalScroll, width]);
+  }, [groundY, refs.totalScroll, width]);
 
   useAnimatedReaction(
     () => refs.totalScroll.value,

@@ -1,34 +1,28 @@
-import {
-  createAudioPlayer,
-  setAudioModeAsync,
-  type AudioPlayer,
-  type AudioSource,
-} from 'expo-audio';
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
+import type { AVPlaybackSource } from 'expo-av';
 import type { GameAudioEvent } from '../types/game';
-import countdownTickSfx from '../assets/audio/sfx/sfx_select.ogg';
-import flipSfx from '../assets/audio/sfx/sfx_jump.ogg';
-import gameOverSfx from '../assets/audio/sfx/game_over_stinger.wav';
-import landSfx from '../assets/audio/sfx/land_thud.wav';
-import nearMissSfx from '../assets/audio/sfx/near_miss_swoosh.wav';
 
 export type SoundKey = 'flip' | 'countdownTick' | 'gameOver' | 'land' | 'nearMiss';
 
-export type LoadedSounds = Record<SoundKey, AudioPlayer>;
+export type LoadedSounds = Record<SoundKey, Audio.Sound>;
 
-const SOUND_SOURCES: Record<SoundKey, AudioSource> = {
-  flip: flipSfx,
-  countdownTick: countdownTickSfx,
-  gameOver: gameOverSfx,
-  land: landSfx,
-  nearMiss: nearMissSfx,
+const SOUND_SOURCES: Record<SoundKey, AVPlaybackSource> = {
+  flip: require('../assets/audio/sfx/sfx_jump.ogg'),
+  countdownTick: require('../assets/audio/sfx/sfx_select.ogg'),
+  gameOver: require('../assets/audio/sfx/game_over_stinger.wav'),
+  land: require('../assets/audio/sfx/land_thud.wav'),
+  nearMiss: require('../assets/audio/sfx/near_miss_swoosh.wav'),
 };
 
 export async function configureAudioMode() {
-  await setAudioModeAsync({
-    playsInSilentMode: true,
-    shouldPlayInBackground: false,
-    shouldRouteThroughEarpiece: false,
-    interruptionMode: 'mixWithOthers',
+  await Audio.setAudioModeAsync({
+    allowsRecordingIOS: false,
+    playsInSilentModeIOS: true,
+    interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
+    interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+    shouldDuckAndroid: true,
+    playThroughEarpieceAndroid: false,
+    staysActiveInBackground: false,
   });
 }
 
@@ -36,27 +30,26 @@ export async function loadSounds() {
   const keys = Object.keys(SOUND_SOURCES) as SoundKey[];
   const loaded = {} as LoadedSounds;
   for (const key of keys) {
-    const player = createAudioPlayer(SOUND_SOURCES[key]);
-    player.loop = false;
-    player.volume = 1;
-    loaded[key] = player;
+    const { sound } = await Audio.Sound.createAsync(SOUND_SOURCES[key], {
+      shouldPlay: false,
+      volume: 1,
+      isLooping: false,
+    });
+    loaded[key] = sound;
   }
   return loaded;
 }
 
 export async function unloadSounds(sounds: Partial<LoadedSounds>) {
-  const playerList = Object.values(sounds).filter(Boolean);
-  for (const player of playerList) {
-    player.release();
-  }
+  const soundList = Object.values(sounds).filter(Boolean);
+  await Promise.all(soundList.map((sound) => sound.unloadAsync()));
 }
 
 export async function playSound(sounds: Partial<LoadedSounds>, key: SoundKey, isMuted: boolean) {
   if (isMuted) return;
-  const player = sounds[key];
-  if (!player) return;
-  player.seekTo(0);
-  player.play();
+  const sound = sounds[key];
+  if (!sound) return;
+  await sound.replayAsync();
 }
 
 export function mapGameEventToSound(event: GameAudioEvent): SoundKey {
