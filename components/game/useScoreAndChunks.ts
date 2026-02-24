@@ -11,7 +11,7 @@ interface UseScoreAndChunksArgs {
   width: number;
   height: number;
   groundY: number;
-  initialGravityDirection: 1 | -1;
+  initialGravityDirection: GravityDirection;
   refs: Pick<
     SimulationRefs,
     | 'groundY'
