@@ -19,7 +19,7 @@ import {
 import { useGameGestures } from './game/useGameGestures';
 import { useGameSimulation } from './game/useGameSimulation';
 import { useScoreAndChunks } from './game/useScoreAndChunks';
-import type { GameCanvasProps } from './game/types';
+import type { GameCanvasProps, GravityDirection } from './game/types';
 import { useWorldPictures } from './game/useWorldPictures';
 
 const SCORE_DISPLAY_BUCKET = 10;
@@ -145,7 +145,7 @@ export const GameCanvas = ({
   const groundY = useSharedValue(0);
   const posY = useSharedValue(0);
   const velocityY = useSharedValue(0);
-  const gravityDirection = useSharedValue(1);
+  const gravityDirection = useSharedValue<GravityDirection>(1);
   const flipLockedUntilLanding = useSharedValue(0);
   const frameIndex = useSharedValue(0);
   const elapsedMs = useSharedValue(0);

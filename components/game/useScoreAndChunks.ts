@@ -5,7 +5,7 @@ import { scheduleOnRN } from 'react-native-worklets';
 import type { Chunk, Platform } from '../../types/game';
 import { generateLevelChunks, preGenerateLevelChunks } from '../../utils/levelGeneratorSections';
 import { CHAR_SCALE, CHAR_SIZE, PLAYER_X_FACTOR, groundHeight, tileSize } from './constants';
-import type { SimulationRefs } from './types';
+import type { GravityDirection, SimulationRefs } from './types';
 
 interface UseScoreAndChunksArgs {
   width: number;
@@ -58,7 +58,7 @@ export const useScoreAndChunks = ({
   useEffect(() => {
     if (height <= 0 || width <= 0) return;
 
-    const spawnGravity = initialGravityDirection === -1 ? -1 : 1;
+    const spawnGravity: GravityDirection = initialGravityDirection === -1 ? -1 : 1;
     const charH = CHAR_SIZE * CHAR_SCALE;
 
     refs.groundY.value = groundY;

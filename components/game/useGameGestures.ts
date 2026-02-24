@@ -79,7 +79,7 @@ export const useGameGestures = ({ refs, triggerAudioEvent, onFlipInput }: UseGam
             scheduleOnRN(onFlipInput);
           }
           refs.flipLockedUntilLanding.value = 1;
-          refs.gravityDirection.value = -gDir;
+          refs.gravityDirection.value = gDir === 1 ? -1 : 1;
           refs.velocityY.value = 0;
           refs.velocityX.value = FLIP_ARC_FORWARD;
         }
