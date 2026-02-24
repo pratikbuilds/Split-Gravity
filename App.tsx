@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSharedValue } from 'react-native-reanimated';
 import { GameCanvas } from 'components/GameCanvas';
 import { HomeScreen } from 'components/HomeScreen';
 import { LobbyScreen } from 'components/multiplayer/LobbyScreen';
@@ -12,6 +13,7 @@ import type {
   GameMode,
   GameResult,
   MultiplayerResult,
+  OpponentSnapshot,
   TerrainTheme,
 } from './types/game';
 import {
@@ -67,6 +69,7 @@ export default function App() {
       : localPlayerId.localeCompare(opponentPlayerId) <= 0;
   const localInitialGravityDirection: 1 | -1 = localStartsBottom ? 1 : -1;
   const opponentInitialGravityDirection: 1 | -1 = localStartsBottom ? -1 : 1;
+  const opponentSnapshotValue = useSharedValue<OpponentSnapshot | null>(null);
 
   const isMutedRef = useRef(isMuted);
   isMutedRef.current = isMuted;
@@ -86,6 +89,9 @@ export default function App() {
     const unsubscribe = multiplayerController.subscribe((state) => {
       setMultiplayerState(state);
     });
+    const unsubscribeOpponent = multiplayerController.subscribeOpponentSnapshot((snapshot) => {
+      opponentSnapshotValue.value = snapshot;
+    });
 
     const heartbeat = setInterval(() => {
       multiplayerController.sendHeartbeat();
@@ -93,10 +99,12 @@ export default function App() {
 
     return () => {
       clearInterval(heartbeat);
+      unsubscribeOpponent();
       unsubscribe();
       multiplayerController.disconnect();
+      opponentSnapshotValue.value = null;
     };
-  }, [multiplayerController]);
+  }, [multiplayerController, opponentSnapshotValue]);
 
   useEffect(() => {
     if (mode !== 'multi') return;
@@ -264,7 +272,7 @@ export default function App() {
               terrainTheme={terrainTheme}
               initialGravityDirection={localInitialGravityDirection}
               opponentInitialGravityDirection={opponentInitialGravityDirection}
-              opponentSnapshot={mode === 'multi' ? multiplayerState.opponentSnapshot : null}
+              opponentSnapshotValue={mode === 'multi' ? opponentSnapshotValue : undefined}
               opponentName={mode === 'multi' ? multiplayerState.opponent?.nickname : undefined}
               opponentConnectionState={
                 mode === 'multi' ? multiplayerState.connectionState : 'connected'

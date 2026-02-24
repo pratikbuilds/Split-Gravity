@@ -79,6 +79,7 @@ export class MultiplayerMatchController {
   private socket: MultiplayerSocket;
   private serverUrl: string;
   private listeners = new Set<(state: MultiplayerViewState) => void>();
+  private opponentListeners = new Set<(snapshot: OpponentSnapshot | null) => void>();
   private state: MultiplayerViewState = initialViewState;
   private clientId: string;
   private pendingCreate: { nickname: string; clientId: string } | null = null;
@@ -86,6 +87,7 @@ export class MultiplayerMatchController {
   private lastStateSentAt = 0;
   private lastSentState: Omit<MatchStatePacket, 't'> | null = null;
   private countdownTimer: ReturnType<typeof setTimeout> | null = null;
+  private intentionallyDisconnecting = false;
 
   constructor(serverUrl = resolveConfiguredServerUrl()) {
     this.serverUrl = serverUrl;
@@ -103,13 +105,23 @@ export class MultiplayerMatchController {
     this.listeners.forEach((listener) => listener(snapshot));
   }
 
+  private emitOpponentSnapshot(snapshot: OpponentSnapshot | null) {
+    this.opponentListeners.forEach((listener) => listener(snapshot));
+  }
+
   private setState(partial: Partial<MultiplayerViewState>) {
     this.state = { ...this.state, ...partial };
     this.emitState();
   }
 
+  private leaveRoomIfNeeded() {
+    if (!this.socket.connected || !this.state.roomCode) return;
+    this.socket.emit('room:leave', { roomCode: this.state.roomCode });
+  }
+
   private registerSocketHandlers() {
     this.socket.on('connect', () => {
+      this.intentionallyDisconnecting = false;
       this.setState({
         connected: true,
         connectionState: 'connected',
@@ -124,14 +136,32 @@ export class MultiplayerMatchController {
         this.socket.emit('room:join', this.pendingJoin);
         this.pendingJoin = null;
       }
+      if (!this.pendingCreate && !this.pendingJoin && this.state.roomCode && this.state.localPlayer) {
+        this.socket.emit('room:join', {
+          roomCode: this.state.roomCode,
+          nickname: this.state.localPlayer.nickname,
+          clientId: this.clientId,
+        });
+      }
     });
 
     this.socket.on('disconnect', () => {
       this.clearCountdownTimer();
+      if (this.intentionallyDisconnecting) {
+        this.intentionallyDisconnecting = false;
+        this.setState({
+          connected: false,
+          connectionState: 'connected',
+          reconnectSecondsRemaining: null,
+          pendingAction: 'none',
+        });
+        return;
+      }
       this.setState({ connected: false, connectionState: 'reconnecting' });
     });
 
     this.socket.on('connect_error', (error) => {
+      this.intentionallyDisconnecting = false;
       const reason = error.message || 'connection failed';
       this.setState({
         connected: false,
@@ -185,18 +215,34 @@ export class MultiplayerMatchController {
         score: state.score,
         t: state.t,
       };
-      this.setState({ opponentSnapshot: snapshot });
+      this.state = {
+        ...this.state,
+        opponentSnapshot: snapshot,
+      };
+      this.emitOpponentSnapshot(snapshot);
     });
 
     this.socket.on('match:result', (result: MatchResult) => {
       this.clearCountdownTimer();
+      const localPlayerId = this.state.localPlayer?.playerId;
+      const localizedReason: MultiplayerResult['reason'] =
+        result.reason === 'disconnect_forfeit' &&
+        Boolean(localPlayerId) &&
+        result.winnerPlayerId === localPlayerId
+          ? 'opponent_disconnect_forfeit'
+          : result.reason;
+      const localizedResult: MultiplayerResult = {
+        ...result,
+        reason: localizedReason,
+      };
       this.setState({
         matchStatus: 'result',
-        multiplayerResult: result,
+        multiplayerResult: localizedResult,
         opponentSnapshot: null,
         reconnectSecondsRemaining: null,
         connectionState: this.state.connected ? 'connected' : this.state.connectionState,
       });
+      this.emitOpponentSnapshot(null);
     });
 
     this.socket.on('session:reconnectWindow', ({ playerId, secondsRemaining }) => {
@@ -221,7 +267,10 @@ export class MultiplayerMatchController {
   private syncRoomState(room: RoomSnapshot) {
     const localByClientId =
       room.players.find((player) => player.clientId === this.clientId) ?? null;
-    const localPlayer = this.state.localPlayer ?? localByClientId;
+    const localPlayer = localByClientId;
+    if (!localPlayer) {
+      return;
+    }
     const opponent = localPlayer
       ? (room.players.find((player) => player.playerId !== localPlayer.playerId) ?? null)
       : null;
@@ -237,6 +286,9 @@ export class MultiplayerMatchController {
 
     if (status !== 'countdown') {
       this.clearCountdownTimer();
+    }
+    if (status !== 'running' && this.state.opponentSnapshot) {
+      this.emitOpponentSnapshot(null);
     }
 
     const clearReconnect =
@@ -275,6 +327,14 @@ export class MultiplayerMatchController {
     };
   }
 
+  subscribeOpponentSnapshot(listener: (snapshot: OpponentSnapshot | null) => void) {
+    this.opponentListeners.add(listener);
+    listener(this.state.opponentSnapshot);
+    return () => {
+      this.opponentListeners.delete(listener);
+    };
+  }
+
   connect() {
     if (!this.socket.connected) {
       this.socket.connect();
@@ -285,6 +345,9 @@ export class MultiplayerMatchController {
     this.clearCountdownTimer();
     this.pendingCreate = null;
     this.pendingJoin = null;
+    this.leaveRoomIfNeeded();
+    if (!this.socket.connected) return;
+    this.intentionallyDisconnecting = true;
     this.socket.disconnect();
   }
 
@@ -296,7 +359,21 @@ export class MultiplayerMatchController {
     };
     this.pendingJoin = null;
     this.pendingCreate = payload;
-    this.setState({ errorMessage: null, pendingAction: 'creating_room' });
+    this.leaveRoomIfNeeded();
+    this.setState({
+      errorMessage: null,
+      pendingAction: 'creating_room',
+      roomCode: null,
+      localPlayer: null,
+      opponent: null,
+      localReady: false,
+      opponentReady: false,
+      matchStatus: 'idle',
+      multiplayerResult: null,
+      reconnectSecondsRemaining: null,
+      opponentSnapshot: null,
+    });
+    this.emitOpponentSnapshot(null);
     this.connect();
     if (this.socket.connected) {
       this.socket.emit('room:create', payload);
@@ -314,7 +391,21 @@ export class MultiplayerMatchController {
     };
     this.pendingCreate = null;
     this.pendingJoin = payload;
-    this.setState({ errorMessage: null, pendingAction: 'joining_room' });
+    this.leaveRoomIfNeeded();
+    this.setState({
+      errorMessage: null,
+      pendingAction: 'joining_room',
+      roomCode: null,
+      localPlayer: null,
+      opponent: null,
+      localReady: false,
+      opponentReady: false,
+      matchStatus: 'idle',
+      multiplayerResult: null,
+      reconnectSecondsRemaining: null,
+      opponentSnapshot: null,
+    });
+    this.emitOpponentSnapshot(null);
     this.connect();
     if (this.socket.connected) {
       this.socket.emit('room:join', payload);
@@ -325,6 +416,7 @@ export class MultiplayerMatchController {
   readyUp() {
     if (!this.state.roomCode || this.state.pendingAction === 'readying' || this.state.localReady)
       return;
+    if (!this.socket.connected) return;
     this.setState({ pendingAction: 'readying' });
     this.socket.emit('room:ready', { roomCode: this.state.roomCode });
   }
@@ -368,6 +460,7 @@ export class MultiplayerMatchController {
   }
 
   reportDeath(score: number) {
+    if (!this.socket.connected || this.state.matchStatus !== 'running') return;
     this.socket.emit('match:death', {
       t: Date.now(),
       score,
@@ -378,6 +471,7 @@ export class MultiplayerMatchController {
     this.clearCountdownTimer();
     this.pendingCreate = null;
     this.pendingJoin = null;
+    this.leaveRoomIfNeeded();
     this.state = {
       ...initialViewState,
       connected: this.socket.connected,
@@ -389,5 +483,6 @@ export class MultiplayerMatchController {
     this.lastSentState = null;
     this.lastStateSentAt = 0;
     this.emitState();
+    this.emitOpponentSnapshot(null);
   }
 }

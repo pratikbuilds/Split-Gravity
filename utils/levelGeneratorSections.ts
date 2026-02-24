@@ -27,13 +27,36 @@ function getChunkEndX(chunk: Chunk): number {
   return Math.max(...chunk.platforms.map((p) => p.x + p.width));
 }
 
-const TOP_CEILING_BOTTOM_TILES = 2; // top platform height in tiles
+const DEFAULT_TOP_CEILING_TILES = 2;
+
+/** Compute corridor bounds from section platforms for pillar placement. */
+function getCorridorBounds(
+  section: LevelSection,
+  groundY: number,
+  tileSize: number
+): { corridorTop: number; corridorBottom: number } {
+  let corridorTop = DEFAULT_TOP_CEILING_TILES * tileSize;
+  let corridorBottom = groundY;
+
+  for (const p of section.platforms) {
+    if (p.surface === 'top') {
+      const bottomEdge = (p.yTiles + p.heightTiles) * tileSize;
+      corridorTop = Math.max(corridorTop, bottomEdge);
+    } else if (p.surface === 'bottom') {
+      const topEdge = groundY - p.yTiles * tileSize;
+      corridorBottom = Math.min(corridorBottom, topEdge);
+    }
+  }
+
+  return { corridorTop, corridorBottom };
+}
 
 function instantiatePlatform(
   p: SectionPlatform,
   startX: number,
   groundY: number,
-  tileSize: number
+  tileSize: number,
+  corridorBounds?: { corridorTop: number; corridorBottom: number }
 ): Platform {
   const worldX = startX + p.xTiles * tileSize;
   const width = p.widthTiles * tileSize;
@@ -41,17 +64,15 @@ function instantiatePlatform(
 
   let worldY: number;
   if (p.surface === 'bottom') {
-    // yTiles = row index above floor (0 = top of bottom platform row)
     worldY = groundY - p.yTiles * tileSize;
   } else if (p.surface === 'pillar' && p.yCorridorRatio !== undefined) {
-    // Corridor-relative: 0 = top, 0.5 = center, 1 = bottom (of pillar placement range)
-    const corridorTop = TOP_CEILING_BOTTOM_TILES * tileSize;
-    const corridorHeight = groundY - corridorTop;
+    const corridorTop = corridorBounds?.corridorTop ?? DEFAULT_TOP_CEILING_TILES * tileSize;
+    const corridorBottom = corridorBounds?.corridorBottom ?? groundY;
+    const corridorHeight = corridorBottom - corridorTop;
     const placementRange = Math.max(0, corridorHeight - height);
     const pillarTop = corridorTop + p.yCorridorRatio * placementRange;
     worldY = Math.round(pillarTop);
   } else {
-    // top and pillar (legacy): yTiles = row index from top of screen
     worldY = p.yTiles * tileSize;
   }
 
@@ -80,8 +101,9 @@ function buildSectionChunk(
   config: LevelGeneratorConfig
 ): Chunk {
   const { groundY, tileSize } = config;
+  const corridorBounds = getCorridorBounds(section, groundY, tileSize);
   const platforms: Platform[] = section.platforms.map((p) =>
-    instantiatePlatform(p, startX, groundY, tileSize)
+    instantiatePlatform(p, startX, groundY, tileSize, corridorBounds)
   );
   const widthPx = section.widthTiles * tileSize;
 

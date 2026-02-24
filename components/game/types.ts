@@ -16,7 +16,7 @@ export type GameCanvasProps = {
   terrainTheme?: TerrainTheme;
   initialGravityDirection?: 1 | -1;
   opponentInitialGravityDirection?: 1 | -1;
-  opponentSnapshot?: OpponentSnapshot | null;
+  opponentSnapshotValue?: SharedValue<OpponentSnapshot | null>;
   opponentConnectionState?: 'connected' | 'reconnecting' | 'forfeit_pending';
   opponentName?: string;
   onFlipInput?: () => void;
@@ -56,7 +56,7 @@ export interface SimulationRefs {
 
 export interface ScoreChunkState {
   chunks: Chunk[];
-  score: number;
+  scoreValue: SharedValue<number>;
   platforms: Platform[];
   chunkRefs: React.MutableRefObject<Chunk[]>;
 }

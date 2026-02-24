@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { SharedValue } from 'react-native-reanimated';
 import { useAnimatedReaction, useSharedValue } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
-import type { Chunk } from '../../types/game';
+import type { Chunk, Platform } from '../../types/game';
 import { generateLevelChunks, preGenerateLevelChunks } from '../../utils/levelGeneratorSections';
 import { CHAR_SCALE, CHAR_SIZE, PLAYER_X_FACTOR, groundHeight, tileSize } from './constants';
 import type { SimulationRefs } from './types';
@@ -33,22 +34,26 @@ interface UseScoreAndChunksArgs {
   >;
 }
 
+export interface UseScoreAndChunksResult {
+  scoreValue: SharedValue<number>;
+  platforms: Platform[];
+}
+
 export const useScoreAndChunks = ({
   width,
   height,
   groundY,
   initialGravityDirection,
   refs,
-}: UseScoreAndChunksArgs) => {
+}: UseScoreAndChunksArgs): UseScoreAndChunksResult => {
   const [chunks, setChunks] = useState<Chunk[]>([]);
-  const [score, setScore] = useState(0);
+  const scoreValue = useSharedValue(0);
   const chunksRef = useRef<Chunk[]>([]);
   chunksRef.current = chunks;
 
   const platforms = useMemo(() => chunks.flatMap((c) => c.platforms), [chunks]);
   const lastSpawnRef = useRef(0);
   const lastSpawnAt = useSharedValue(0);
-  const lastScoreAt = useSharedValue(0);
 
   useEffect(() => {
     if (height <= 0 || width <= 0) return;
@@ -74,20 +79,16 @@ export const useScoreAndChunks = ({
     refs.initialized.value = 1;
     lastSpawnRef.current = 0;
     lastSpawnAt.value = 0;
-    lastScoreAt.value = 0;
+    scoreValue.value = 0;
 
     const config = { groundY, tileSize, screenWidth: width };
     const initialChunks = preGenerateLevelChunks(config);
     setChunks(initialChunks);
-    setScore(0);
-  }, [groundY, height, initialGravityDirection, lastScoreAt, lastSpawnAt, refs, width]);
+  }, [groundY, height, initialGravityDirection, lastSpawnAt, refs, scoreValue, width]);
 
   useEffect(() => {
     const rects: number[] = [];
     for (const p of platforms) {
-      // Physics colliders should represent only exposed platform surfaces.
-      // Using a single rect per platform prevents internal tile seams from
-      // being interpreted as valid landing/ceiling collision planes.
       rects.push(p.x, p.y, p.width, p.height);
     }
     refs.platformRects.value = rects;
@@ -109,23 +110,22 @@ export const useScoreAndChunks = ({
     }
   }, [groundY, refs.totalScroll, width]);
 
+  // Score updates live on the UI thread via SharedValue — no React re-renders.
+  // ScoreOverlay subscribes independently and only re-renders itself.
   useAnimatedReaction(
     () => refs.totalScroll.value,
     (scroll) => {
-      if (scroll - lastSpawnAt.value >= 300) {
+      'worklet';
+      scoreValue.value = scroll;
+      if (scroll > lastSpawnAt.value + 300) {
         lastSpawnAt.value = scroll;
         scheduleOnRN(spawnChunks);
-      }
-      if (scroll - lastScoreAt.value >= 50) {
-        lastScoreAt.value = scroll;
-        scheduleOnRN(setScore, Math.floor(scroll));
       }
     }
   );
 
   return {
-    chunks,
-    score,
+    scoreValue,
     platforms,
   };
 };

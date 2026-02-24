@@ -54,6 +54,10 @@ export interface RoomReadyPayload {
   roomCode: string;
 }
 
+export interface RoomLeavePayload {
+  roomCode: string;
+}
+
 export interface MatchInputPayload {
   t: number;
   inputType: 'flip';
@@ -82,6 +86,7 @@ export interface ClientToServerEvents {
   'room:create': (payload: RoomCreatePayload) => void;
   'room:join': (payload: RoomJoinPayload) => void;
   'room:ready': (payload: RoomReadyPayload) => void;
+  'room:leave': (payload: RoomLeavePayload) => void;
   'match:input': (payload: MatchInputPayload) => void;
   'match:state': (payload: MatchStatePacket) => void;
   'match:death': (payload: MatchDeathPayload) => void;
