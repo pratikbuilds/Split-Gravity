@@ -2,15 +2,126 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Image, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { GestureDetector } from 'react-native-gesture-handler';
-import { useSharedValue } from 'react-native-reanimated';
-import { Atlas, Canvas, Group, Picture } from '@shopify/react-native-skia';
-import type { GameAudioEvent } from '../types/game';
-import { CHAR_SCALE, CHAR_SIZE, ENABLE_COLLIDER_DEBUG_UI, groundHeight } from './game/constants';
+import type { SharedValue } from 'react-native-reanimated';
+import { useAnimatedReaction, useSharedValue } from 'react-native-reanimated';
+import { Atlas, Canvas, Group, Line, Picture, Rect } from '@shopify/react-native-skia';
+import { scheduleOnRN } from 'react-native-worklets';
+import { FLAT_ZONE_LENGTH, type GameAudioEvent, type OpponentSnapshot } from '../types/game';
+import {
+  CHAR_SCALE,
+  CHAR_SIZE,
+  DEATH_MARGIN_FRACTION,
+  EDGE_CONTACT_MARGIN,
+  ENABLE_COLLIDER_DEBUG_UI,
+  OPPONENT_X_FACTOR,
+  groundHeight,
+} from './game/constants';
 import { useGameGestures } from './game/useGameGestures';
 import { useGameSimulation } from './game/useGameSimulation';
 import { useScoreAndChunks } from './game/useScoreAndChunks';
 import type { GameCanvasProps } from './game/types';
 import { useWorldPictures } from './game/useWorldPictures';
+
+const SCORE_DISPLAY_BUCKET = 10;
+const OPPONENT_SCORE_DISPLAY_BUCKET = 10;
+type DebugOverlayState = {
+  playerX: number;
+  playerY: number;
+  playerFootY: number;
+  playerCenterX: number;
+  playerCenterY: number;
+  playerVelocityY: number;
+  playerGravityY: number;
+  opponentY: number;
+  opponentFootY: number;
+  flatZoneX: number;
+};
+type OpponentHudState = {
+  visible: boolean;
+  alive: boolean;
+  score: number;
+};
+
+const ScoreOverlay = React.memo(({ scoreValue }: { scoreValue: SharedValue<number> }) => {
+  const [display, setDisplay] = useState(0);
+
+  useAnimatedReaction(
+    () => Math.floor(scoreValue.value / SCORE_DISPLAY_BUCKET),
+    (bucket, prev) => {
+      'worklet';
+      if (bucket !== prev) {
+        scheduleOnRN(setDisplay, bucket * SCORE_DISPLAY_BUCKET);
+      }
+    }
+  );
+
+  return (
+    <View style={styles.scoreWrapper}>
+      <Text style={styles.scoreLabel}>SCORE</Text>
+      <Text style={styles.scoreText}>{display}m</Text>
+    </View>
+  );
+});
+
+const OpponentOverlay = React.memo(
+  ({
+    snapshotValue,
+    opponentConnectionState,
+    opponentName,
+  }: {
+    snapshotValue: SharedValue<OpponentSnapshot | null>;
+    opponentConnectionState: NonNullable<GameCanvasProps['opponentConnectionState']>;
+    opponentName?: string;
+  }) => {
+    const [display, setDisplay] = useState<OpponentHudState>({
+      visible: false,
+      alive: false,
+      score: 0,
+    });
+
+    useAnimatedReaction(
+      () => {
+        const snapshot = snapshotValue.value;
+        if (!snapshot) return null;
+        return {
+          alive: snapshot.alive ? 1 : 0,
+          scoreBucket: Math.floor(snapshot.score / OPPONENT_SCORE_DISPLAY_BUCKET),
+        };
+      },
+      (next, prev) => {
+        'worklet';
+        if (!next) {
+          if (prev !== null) {
+            scheduleOnRN(setDisplay, {
+              visible: false,
+              alive: false,
+              score: 0,
+            });
+          }
+          return;
+        }
+
+        if (prev === null || next.alive !== prev.alive || next.scoreBucket !== prev.scoreBucket) {
+          scheduleOnRN(setDisplay, {
+            visible: true,
+            alive: next.alive === 1,
+            score: next.scoreBucket * OPPONENT_SCORE_DISPLAY_BUCKET,
+          });
+        }
+      }
+    );
+
+    if (!display.visible) return null;
+    return (
+      <View style={styles.opponentHud}>
+        <Text style={styles.opponentTitle}>{opponentName ?? 'Opponent'}</Text>
+        <Text style={styles.opponentState}>{display.alive ? 'Alive' : 'Down'}</Text>
+        <Text style={styles.opponentState}>Score: {display.score}m</Text>
+        <Text style={styles.connectionState}>Net: {opponentConnectionState}</Text>
+      </View>
+    );
+  }
+);
 
 export const GameCanvas = ({
   onExit,
@@ -20,7 +131,7 @@ export const GameCanvas = ({
   terrainTheme = 'grass',
   initialGravityDirection = 1,
   opponentInitialGravityDirection,
-  opponentSnapshot,
+  opponentSnapshotValue,
   opponentConnectionState = 'connected',
   opponentName,
   onFlipInput,
@@ -28,6 +139,7 @@ export const GameCanvas = ({
   onLocalDeath,
 }: GameCanvasProps) => {
   const [countdownDigit, setCountdownDigit] = useState<3 | 2 | 1 | null>(3);
+  const [debugOverlay, setDebugOverlay] = useState<DebugOverlayState | null>(null);
   const { width, height } = useWindowDimensions();
 
   const groundY = useSharedValue(0);
@@ -115,7 +227,8 @@ export const GameCanvas = ({
   }, []);
 
   const stableGroundY = height - groundHeight;
-  const { score, platforms } = useScoreAndChunks({
+  const charSize = CHAR_SIZE * CHAR_SCALE;
+  const { scoreValue, platforms } = useScoreAndChunks({
     width,
     height,
     groundY: stableGroundY,
@@ -142,7 +255,9 @@ export const GameCanvas = ({
   const {
     characterImage,
     characterTransforms,
+    characterRenderTransform,
     opponentTransforms,
+    opponentRenderTransform,
     characterSprites,
     backgroundPicture,
     backgroundTransform,
@@ -163,12 +278,13 @@ export const GameCanvas = ({
   }, []);
 
   useEffect(() => {
-    const charH = CHAR_SIZE * CHAR_SCALE;
+    const charH = charSize;
     const opponentSpawnGravity =
       opponentInitialGravityDirection ?? (initialGravityDirection === 1 ? -1 : 1);
     opponentGravity.value = opponentSpawnGravity;
     opponentPosY.value = opponentSpawnGravity === -1 ? groundHeight : stableGroundY - charH;
   }, [
+    charSize,
     initialGravityDirection,
     opponentGravity,
     opponentInitialGravityDirection,
@@ -207,7 +323,7 @@ export const GameCanvas = ({
     return () => {
       clearInterval(timer);
     };
-  }, [countdownLocked, refs.initialized, refs.velocityX]);
+  }, [countdownLocked, refs.initialized, refs.velocityX, triggerAudioEvent]);
 
   const countdownImageSource = useMemo(() => {
     if (countdownDigit === 1) {
@@ -222,34 +338,77 @@ export const GameCanvas = ({
     return null;
   }, [countdownDigit]);
 
-  useEffect(() => {
-    if (!opponentSnapshot) {
-      opponentAlive.value = 0;
-      return;
-    }
+  const fallbackOpponentSnapshotValue = useSharedValue<OpponentSnapshot | null>(null);
+  const opponentSnapshotSignal = opponentSnapshotValue ?? fallbackOpponentSnapshotValue;
 
-    const charH = CHAR_SIZE * CHAR_SCALE;
-    const laneSpan = Math.max(1, height - 2 * groundHeight - charH);
-    opponentPosY.value = groundHeight + opponentSnapshot.normalizedY * laneSpan;
-    opponentGravity.value = opponentSnapshot.gravityDir;
-    opponentAlive.value = opponentSnapshot.alive ? 1 : 0;
-  }, [height, opponentAlive, opponentGravity, opponentPosY, opponentSnapshot]);
+  useAnimatedReaction(
+    () => opponentSnapshotSignal.value,
+    (snapshot) => {
+      'worklet';
+      if (!snapshot) {
+        opponentAlive.value = 0;
+        return;
+      }
+      const laneSpan = Math.max(1, height - 2 * groundHeight - charSize);
+      opponentPosY.value = groundHeight + snapshot.normalizedY * laneSpan;
+      opponentGravity.value = snapshot.gravityDir;
+      opponentAlive.value = snapshot.alive ? 1 : 0;
+    },
+    [charSize, height, opponentAlive, opponentGravity, opponentPosY, opponentSnapshotSignal]
+  );
+
+  const opponentX = width * OPPONENT_X_FACTOR;
+  const deathLineBottom = stableGroundY + charSize * DEATH_MARGIN_FRACTION;
+  const deathLineTop = -charSize * DEATH_MARGIN_FRACTION;
+
+  useAnimatedReaction(
+    () => {
+      if (!ENABLE_COLLIDER_DEBUG_UI) {
+        return null;
+      }
+      const playerX = refs.charX.value;
+      const playerY = refs.posY.value;
+      const gravityDown = refs.gravityDirection.value !== -1;
+      const playerFootY = gravityDown ? playerY + charSize : playerY;
+      const playerCenterX = playerX + charSize / 2;
+      const playerCenterY = playerY + charSize / 2;
+      const playerVelocityY = playerCenterY + refs.velocityY.value * 0.06;
+      const playerGravityY = playerCenterY + (gravityDown ? 26 : -26);
+      const opponentY = refs.opponentPosY.value;
+      const opponentFootY = refs.opponentGravity.value === -1 ? opponentY : opponentY + charSize;
+      const flatZoneX = FLAT_ZONE_LENGTH - refs.totalScroll.value;
+      return {
+        playerX,
+        playerY,
+        playerFootY,
+        playerCenterX,
+        playerCenterY,
+        playerVelocityY,
+        playerGravityY,
+        opponentY,
+        opponentFootY,
+        flatZoneX,
+      };
+    },
+    (next) => {
+      'worklet';
+      if (!next) {
+        scheduleOnRN(setDebugOverlay, null);
+        return;
+      }
+      scheduleOnRN(setDebugOverlay, next);
+    }
+  );
 
   return (
     <View style={[styles.container, { width, height }]}>
-      <View style={styles.scoreWrapper}>
-        <Text style={styles.scoreLabel}>SCORE</Text>
-        <Text style={styles.scoreText}>{score}m</Text>
-      </View>
+      <ScoreOverlay scoreValue={scoreValue} />
 
-      {opponentSnapshot && (
-        <View style={styles.opponentHud}>
-          <Text style={styles.opponentTitle}>{opponentName ?? 'Opponent'}</Text>
-          <Text style={styles.opponentState}>{opponentSnapshot.alive ? 'Alive' : 'Down'}</Text>
-          <Text style={styles.opponentState}>Score: {opponentSnapshot.score}m</Text>
-          <Text style={styles.connectionState}>Net: {opponentConnectionState}</Text>
-        </View>
-      )}
+      <OpponentOverlay
+        snapshotValue={opponentSnapshotSignal}
+        opponentConnectionState={opponentConnectionState}
+        opponentName={opponentName}
+      />
 
       <GestureDetector gesture={tapGesture}>
         <Canvas style={styles.canvas}>
@@ -269,19 +428,80 @@ export const GameCanvas = ({
             </Group>
           )}
           {characterImage && (
-            <Atlas
-              image={characterImage}
-              sprites={characterSprites}
-              transforms={characterTransforms}
-            />
+            <Group transform={characterRenderTransform}>
+              <Atlas
+                image={characterImage}
+                sprites={characterSprites}
+                transforms={characterTransforms}
+              />
+            </Group>
           )}
-          {characterImage && opponentSnapshot?.alive ? (
-            <Atlas
-              image={characterImage}
-              sprites={characterSprites}
-              transforms={opponentTransforms}
-            />
+          {characterImage ? (
+            <Group transform={opponentRenderTransform}>
+              <Atlas
+                image={characterImage}
+                sprites={characterSprites}
+                transforms={opponentTransforms}
+              />
+            </Group>
           ) : null}
+          {ENABLE_COLLIDER_DEBUG_UI && debugOverlay && (
+            <>
+              <Line p1={{ x: 0, y: groundHeight }} p2={{ x: width, y: groundHeight }} color="#f59e0b" />
+              <Line p1={{ x: 0, y: stableGroundY }} p2={{ x: width, y: stableGroundY }} color="#f59e0b" />
+              <Line
+                p1={{ x: 0, y: deathLineBottom }}
+                p2={{ x: width, y: deathLineBottom }}
+                color="#ef4444"
+              />
+              <Line p1={{ x: 0, y: deathLineTop }} p2={{ x: width, y: deathLineTop }} color="#ef4444" />
+              <Line
+                p1={{ x: debugOverlay.flatZoneX, y: 0 }}
+                p2={{ x: debugOverlay.flatZoneX, y: height }}
+                color="#22c55e"
+              />
+
+              <Rect
+                x={debugOverlay.playerX}
+                y={debugOverlay.playerY}
+                width={charSize}
+                height={charSize}
+                color="#10b981"
+                style="stroke"
+                strokeWidth={2}
+              />
+              <Line
+                p1={{ x: debugOverlay.playerX + EDGE_CONTACT_MARGIN, y: debugOverlay.playerFootY }}
+                p2={{ x: debugOverlay.playerX + charSize - EDGE_CONTACT_MARGIN, y: debugOverlay.playerFootY }}
+                color="#fde047"
+              />
+              <Line
+                p1={{ x: debugOverlay.playerCenterX, y: debugOverlay.playerCenterY }}
+                p2={{ x: debugOverlay.playerCenterX, y: debugOverlay.playerVelocityY }}
+                color="#38bdf8"
+              />
+              <Line
+                p1={{ x: debugOverlay.playerCenterX, y: debugOverlay.playerCenterY }}
+                p2={{ x: debugOverlay.playerCenterX, y: debugOverlay.playerGravityY }}
+                color="#f472b6"
+              />
+
+              <Rect
+                x={opponentX}
+                y={debugOverlay.opponentY}
+                width={charSize}
+                height={charSize}
+                color="#fb923c"
+                style="stroke"
+                strokeWidth={2}
+              />
+              <Line
+                p1={{ x: opponentX + EDGE_CONTACT_MARGIN, y: debugOverlay.opponentFootY }}
+                p2={{ x: opponentX + charSize - EDGE_CONTACT_MARGIN, y: debugOverlay.opponentFootY }}
+                color="#fdba74"
+              />
+            </>
+          )}
         </Canvas>
       </GestureDetector>
 

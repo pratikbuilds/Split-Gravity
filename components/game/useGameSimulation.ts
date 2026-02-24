@@ -317,7 +317,7 @@ export const useGameSimulation = ({
     refs.elapsedMs.value += dt;
     while (refs.elapsedMs.value >= FRAME_INTERVAL_MS) {
       refs.elapsedMs.value -= FRAME_INTERVAL_MS;
-      refs.frameIndex.value = (refs.frameIndex.value + 1) % 2;
+      refs.frameIndex.value = (refs.frameIndex.value + 1) % 360;
     }
 
     if (onLocalState && refs.frameIndex.value % 2 === 0) {

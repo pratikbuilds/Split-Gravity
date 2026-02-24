@@ -12,6 +12,15 @@ import type {
   RoomSnapshot,
   ServerToClientEvents,
 } from '../../shared/multiplayer-contracts';
+import {
+  MAX_SCORE,
+  derivePreMatchState,
+  isValidClientId,
+  isValidMatchStatePayload,
+  normalizeRoomCode,
+  pruneDisconnectedReadyPlayers,
+  sanitizeNickname,
+} from './multiplayerGuards';
 
 const PORT = Number(process.env.PORT || 4100);
 const RECONNECT_GRACE_MS = 10_000;
@@ -92,6 +101,17 @@ const createRoomCode = () => {
   return roomCode;
 };
 
+const clearPlayerTimers = (player: ServerPlayer) => {
+  if (player.disconnectTimer) {
+    clearTimeout(player.disconnectTimer);
+    player.disconnectTimer = undefined;
+  }
+  if (player.reconnectInterval) {
+    clearInterval(player.reconnectInterval);
+    player.reconnectInterval = undefined;
+  }
+};
+
 const snapshotRoom = (room: Room): RoomSnapshot => ({
   roomCode: room.roomCode,
   state: room.state,
@@ -142,6 +162,32 @@ const scheduleRoomCleanup = (room: Room, delayMs = ROOM_TTL_MS) => {
   }, delayMs);
 };
 
+const removePlayerFromRoom = (room: Room, playerId: string) => {
+  const player = room.players.get(playerId);
+  if (!player) return;
+
+  clearPlayerTimers(player);
+  room.players.delete(playerId);
+  room.byClientId.delete(player.clientId);
+  room.readyPlayerIds.delete(playerId);
+
+  if (room.players.size === 0) {
+    clearRoomCleanup(room);
+    rooms.delete(room.roomCode);
+    logAt('info', 'room.deleted_empty', { roomCode: room.roomCode });
+    return;
+  }
+
+  if (room.state !== 'RUNNING' && room.state !== 'ENDED') {
+    room.state = derivePreMatchState(room.players.size, room.readyPlayerIds.size);
+  }
+
+  emitRoomState(room);
+  if (room.state !== 'RUNNING' && room.state !== 'ENDED' && room.players.size < 2) {
+    scheduleRoomCleanup(room);
+  }
+};
+
 const endMatch = (
   room: Room,
   winnerPlayerId: string,
@@ -161,14 +207,7 @@ const endMatch = (
   room.state = 'ENDED';
   room.readyPlayerIds.clear();
   for (const player of room.players.values()) {
-    if (player.disconnectTimer) {
-      clearTimeout(player.disconnectTimer);
-      player.disconnectTimer = undefined;
-    }
-    if (player.reconnectInterval) {
-      clearInterval(player.reconnectInterval);
-      player.reconnectInterval = undefined;
-    }
+    clearPlayerTimers(player);
   }
   room.result = {
     winnerPlayerId,
@@ -224,10 +263,15 @@ const startMatchIfReady = (room: Room) => {
 
     const allConnected = [...room.players.values()].every((player) => player.connected);
     if (!allConnected) {
+      pruneDisconnectedReadyPlayers(room.readyPlayerIds, room.players.values());
+      room.state = derivePreMatchState(room.players.size, room.readyPlayerIds.size);
       logAt('warn', 'match.countdown.cancelled', {
         roomCode: room.roomCode,
         reason: 'players_disconnected',
+        nextState: room.state,
+        readyCount: room.readyPlayerIds.size,
       });
+      emitRoomState(room);
       return;
     }
 
@@ -265,6 +309,25 @@ io.on('connection', (socket) => {
   logAt('info', 'socket.connected', { socketId: socket.id });
 
   socket.on('room:create', ({ nickname, clientId }) => {
+    if (!isValidClientId(clientId)) {
+      logAt('warn', 'room.create.invalid_client_id', { socketId: socket.id, clientId });
+      socket.emit('error', { code: 'INVALID_CLIENT_ID', message: 'Invalid client session. Reopen app.' });
+      return;
+    }
+
+    const linked = findRoomBySocket(socket.id);
+    if (linked) {
+      if (linked.room.state === 'RUNNING') {
+        socket.emit('error', {
+          code: 'MATCH_IN_PROGRESS',
+          message: 'Finish the current match before creating a new room.',
+        });
+        return;
+      }
+      socket.leave(linked.room.roomCode);
+      removePlayerFromRoom(linked.room, linked.player.playerId);
+    }
+
     const roomCode = createRoomCode();
     const playerId = randomUUID();
     const room: Room = {
@@ -280,7 +343,7 @@ io.on('connection', (socket) => {
     const player: ServerPlayer = {
       playerId,
       clientId,
-      nickname: nickname.trim() || 'Player 1',
+      nickname: sanitizeNickname(nickname, 'Player 1'),
       alive: true,
       connected: true,
       socketId: socket.id,
@@ -308,7 +371,13 @@ io.on('connection', (socket) => {
   });
 
   socket.on('room:join', ({ roomCode, nickname, clientId }) => {
-    const normalizedCode = roomCode.trim().toUpperCase();
+    if (!isValidClientId(clientId)) {
+      logAt('warn', 'room.join.invalid_client_id', { socketId: socket.id, clientId });
+      socket.emit('error', { code: 'INVALID_CLIENT_ID', message: 'Invalid client session. Reopen app.' });
+      return;
+    }
+
+    const normalizedCode = normalizeRoomCode(roomCode);
     const room = rooms.get(normalizedCode);
     if (!room) {
       logAt('warn', 'room.join.failed_not_found', {
@@ -330,6 +399,19 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const linked = findRoomBySocket(socket.id);
+    if (linked && linked.room.roomCode !== normalizedCode) {
+      if (linked.room.state === 'RUNNING') {
+        socket.emit('error', {
+          code: 'MATCH_IN_PROGRESS',
+          message: 'Finish the current match before joining another room.',
+        });
+        return;
+      }
+      socket.leave(linked.room.roomCode);
+      removePlayerFromRoom(linked.room, linked.player.playerId);
+    }
+
     let playerId = room.byClientId.get(clientId);
     let player = playerId ? room.players.get(playerId) : undefined;
 
@@ -337,13 +419,10 @@ io.on('connection', (socket) => {
       player.socketId = socket.id;
       player.connected = true;
       player.lastSeenAt = Date.now();
-      if (player.disconnectTimer) {
-        clearTimeout(player.disconnectTimer);
-        player.disconnectTimer = undefined;
-      }
-      if (player.reconnectInterval) {
-        clearInterval(player.reconnectInterval);
-        player.reconnectInterval = undefined;
+      player.nickname = sanitizeNickname(nickname, player.nickname);
+      clearPlayerTimers(player);
+      if (room.state !== 'RUNNING') {
+        room.state = derivePreMatchState(room.players.size, room.readyPlayerIds.size);
       }
       socket.join(normalizedCode);
       logAt('info', 'room.rejoined', {
@@ -353,6 +432,7 @@ io.on('connection', (socket) => {
         socketId: socket.id,
       });
       emitRoomState(room);
+      startMatchIfReady(room);
       return;
     }
 
@@ -370,7 +450,7 @@ io.on('connection', (socket) => {
     player = {
       playerId,
       clientId,
-      nickname: nickname.trim() || 'Player 2',
+      nickname: sanitizeNickname(nickname, 'Player 2'),
       alive: true,
       connected: true,
       socketId: socket.id,
@@ -390,10 +470,53 @@ io.on('connection', (socket) => {
       socketId: socket.id,
     });
     emitRoomState(room);
+    startMatchIfReady(room);
+  });
+
+  socket.on('room:leave', ({ roomCode }) => {
+    const linked = findRoomBySocket(socket.id);
+    if (!linked) return;
+
+    const normalizedCode = normalizeRoomCode(roomCode);
+    if (normalizedCode && linked.room.roomCode !== normalizedCode) {
+      logAt('warn', 'room.leave.ignored_room_mismatch', {
+        requestedRoomCode: normalizedCode,
+        actualRoomCode: linked.room.roomCode,
+        socketId: socket.id,
+      });
+      return;
+    }
+
+    const { room, player } = linked;
+    socket.leave(room.roomCode);
+
+    if (room.state === 'RUNNING') {
+      const opponent = [...room.players.values()].find(
+        (candidate) => candidate.playerId !== player.playerId
+      );
+      if (!opponent) {
+        removePlayerFromRoom(room, player.playerId);
+        return;
+      }
+      player.connected = false;
+      endMatch(room, opponent.playerId, player.playerId, 'disconnect_forfeit');
+      logAt('warn', 'room.left.running_forfeit', {
+        roomCode: room.roomCode,
+        loserPlayerId: player.playerId,
+      });
+      return;
+    }
+
+    removePlayerFromRoom(room, player.playerId);
+    logAt('info', 'room.left', {
+      roomCode: room.roomCode,
+      playerId: player.playerId,
+      state: room.state,
+    });
   });
 
   socket.on('room:ready', ({ roomCode }) => {
-    const normalizedCode = roomCode.trim().toUpperCase();
+    const normalizedCode = normalizeRoomCode(roomCode);
     const room = rooms.get(normalizedCode);
     if (!room) return;
     const linked = findRoomBySocket(socket.id);
@@ -443,6 +566,14 @@ io.on('connection', (socket) => {
 
     const { room, player } = linked;
     player.lastSeenAt = Date.now();
+
+    if (!isValidMatchStatePayload(payload)) {
+      logAt('warn', 'match.state.rejected_invalid_payload', {
+        roomCode: room.roomCode,
+        playerId: player.playerId,
+      });
+      return;
+    }
 
     const previous = player.lastState;
     if (previous && payload.t < previous.t) {
@@ -501,6 +632,14 @@ io.on('connection', (socket) => {
     if (!linked || linked.room.state !== 'RUNNING') return;
 
     const { room, player } = linked;
+    if (!Number.isFinite(score) || score < 0 || score > MAX_SCORE) {
+      logAt('warn', 'match.death.rejected_invalid_score', {
+        roomCode: room.roomCode,
+        playerId: player.playerId,
+        score,
+      });
+      return;
+    }
     if (!player.alive) return;
     player.alive = false;
 
@@ -545,11 +684,20 @@ io.on('connection', (socket) => {
       playerId: player.playerId,
       state: room.state,
     });
-    emitRoomState(room);
 
     if (room.state !== 'RUNNING') {
+      pruneDisconnectedReadyPlayers(room.readyPlayerIds, room.players.values());
+      if (room.state !== 'ENDED') {
+        room.state = derivePreMatchState(room.players.size, room.readyPlayerIds.size);
+      }
+      emitRoomState(room);
+      if (room.state !== 'ENDED' && room.players.size < 2) {
+        scheduleRoomCleanup(room);
+      }
       return;
     }
+
+    emitRoomState(room);
 
     const opponent = [...room.players.values()].find(
       (candidate) => candidate.playerId !== player.playerId
@@ -616,21 +764,30 @@ setInterval(() => {
   const now = Date.now();
   for (const [roomCode, room] of rooms.entries()) {
     if (room.state === 'ENDED') continue;
-    if (now - room.createdAt > ROOM_TTL_MS && room.players.size < 2) {
+    const connectedPlayerCount = [...room.players.values()].filter((player) => player.connected).length;
+    if (now - room.createdAt > ROOM_TTL_MS && room.state !== 'RUNNING' && connectedPlayerCount < 2) {
       rooms.delete(roomCode);
       logAt('info', 'room.evicted_stale', { roomCode });
       continue;
     }
 
+    let markedInactive = false;
     for (const player of room.players.values()) {
       if (player.connected && now - player.lastSeenAt > 15_000) {
         player.connected = false;
+        markedInactive = true;
         logAt('warn', 'player.marked_inactive', {
           roomCode,
           playerId: player.playerId,
           idleMs: now - player.lastSeenAt,
         });
       }
+    }
+
+    if (markedInactive && room.state !== 'RUNNING') {
+      pruneDisconnectedReadyPlayers(room.readyPlayerIds, room.players.values());
+      room.state = derivePreMatchState(room.players.size, room.readyPlayerIds.size);
+      emitRoomState(room);
     }
   }
 }, 5_000);

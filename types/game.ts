@@ -12,7 +12,8 @@ export interface Chunk {
   id: string;
   width: number;
   platforms: Platform[];
-  difficulty: 'flat' | 'easy' | 'medium' | 'hard';
+  challenge: number;
+  phase: 'intro' | 'main' | 'recovery';
 }
 
 export interface GameResult {
@@ -46,15 +47,17 @@ export interface MultiplayerResult {
   endedAt: number;
 }
 
-export type GameAudioEvent =
-  | 'flip'
-  | 'countdown_tick'
-  | 'game_over'
-  | 'land'
-  | 'near_miss';
+export type GameAudioEvent = 'flip' | 'countdown_tick' | 'game_over' | 'land' | 'near_miss';
+
+// Level generator config (used by section-based generator)
+export interface LevelGeneratorConfig {
+  groundY: number;
+  tileSize: number;
+  screenWidth: number;
+}
 
 // Reachability constants (tune from physics)
 export const MAX_FLIP_HORIZONTAL = 120; // px horizontal distance per flip arc
 export const MIN_LANDING_WIDTH = 48; // min platform width to land safely
 export const SAFE_MARGIN = 20; // conservative gap margin
-export const FLAT_ZONE_LENGTH = 800; // px of continuous ground at start
+export const FLAT_ZONE_LENGTH = 400; // px of continuous ground at start

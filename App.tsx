@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSharedValue } from 'react-native-reanimated';
 import { GameCanvas } from 'components/GameCanvas';
 import { HomeScreen } from 'components/HomeScreen';
 import { LobbyScreen } from 'components/multiplayer/LobbyScreen';
@@ -11,6 +13,7 @@ import type {
   GameMode,
   GameResult,
   MultiplayerResult,
+  OpponentSnapshot,
   TerrainTheme,
 } from './types/game';
 import {
@@ -66,6 +69,7 @@ export default function App() {
       : localPlayerId.localeCompare(opponentPlayerId) <= 0;
   const localInitialGravityDirection: 1 | -1 = localStartsBottom ? 1 : -1;
   const opponentInitialGravityDirection: 1 | -1 = localStartsBottom ? -1 : 1;
+  const opponentSnapshotValue = useSharedValue<OpponentSnapshot | null>(null);
 
   const isMutedRef = useRef(isMuted);
   isMutedRef.current = isMuted;
@@ -85,6 +89,9 @@ export default function App() {
     const unsubscribe = multiplayerController.subscribe((state) => {
       setMultiplayerState(state);
     });
+    const unsubscribeOpponent = multiplayerController.subscribeOpponentSnapshot((snapshot) => {
+      opponentSnapshotValue.value = snapshot;
+    });
 
     const heartbeat = setInterval(() => {
       multiplayerController.sendHeartbeat();
@@ -92,10 +99,12 @@ export default function App() {
 
     return () => {
       clearInterval(heartbeat);
+      unsubscribeOpponent();
       unsubscribe();
       multiplayerController.disconnect();
+      opponentSnapshotValue.value = null;
     };
-  }, [multiplayerController]);
+  }, [multiplayerController, opponentSnapshotValue]);
 
   useEffect(() => {
     if (mode !== 'multi') return;
@@ -236,120 +245,124 @@ export default function App() {
     multiplayerResult && localPlayerId ? multiplayerResult.winnerPlayerId === localPlayerId : false;
 
   return (
-    <GestureHandlerRootView style={styles.root}>
-      {screen === 'home' ? (
-        <HomeScreen onSinglePlay={handleSinglePlay} onMultiplay={handleMultiplay} />
-      ) : null}
+    <SafeAreaProvider>
+      <GestureHandlerRootView style={styles.root}>
+        {screen === 'home' ? (
+          <HomeScreen onSinglePlay={handleSinglePlay} onMultiplay={handleMultiplay} />
+        ) : null}
 
-      {screen === 'lobby' ? (
-        <LobbyScreen
-          state={multiplayerState}
-          onBack={handleExitToHome}
-          onCreateRoom={handleCreateRoom}
-          onJoinRoom={handleJoinRoom}
-          onReady={handleReadyRoom}
-        />
-      ) : null}
-
-      {screen === 'game' ? (
-        <>
-          <GameCanvas
-            key={gameKey}
-            onExit={handleExitToHome}
-            onGameOver={handleSinglePlayerGameOver}
-            onAudioEvent={triggerSound}
-            backgroundIndex={backgroundIndex}
-            terrainTheme={terrainTheme}
-            initialGravityDirection={localInitialGravityDirection}
-            opponentInitialGravityDirection={opponentInitialGravityDirection}
-            opponentSnapshot={mode === 'multi' ? multiplayerState.opponentSnapshot : null}
-            opponentName={mode === 'multi' ? multiplayerState.opponent?.nickname : undefined}
-            opponentConnectionState={
-              mode === 'multi' ? multiplayerState.connectionState : 'connected'
-            }
-            onFlipInput={mode === 'multi' ? handleFlipInput : undefined}
-            onLocalState={mode === 'multi' ? handleLocalState : undefined}
-            onLocalDeath={mode === 'multi' ? handleLocalDeath : undefined}
+        {screen === 'lobby' ? (
+          <LobbyScreen
+            state={multiplayerState}
+            onBack={handleExitToHome}
+            onCreateRoom={handleCreateRoom}
+            onJoinRoom={handleJoinRoom}
+            onReady={handleReadyRoom}
           />
+        ) : null}
 
-          {mode === 'single' && gameOver && (
-            <View style={styles.gameOverOverlay}>
-              <View style={styles.gameOverBackdrop} />
-              <View style={styles.gameOverModal}>
-                <Text style={styles.gameOverTitle}>Game Over</Text>
-                <Text style={styles.gameOverSubtitle}>You fell into the ditch!</Text>
-                <Text style={styles.scoreText}>Score: {lastResult?.playerScore ?? 0}m</Text>
-                <View style={styles.gameOverButtons}>
-                  <Pressable style={styles.restartButton} onPress={handleRestart}>
-                    <Text style={styles.buttonText}>Restart</Text>
-                  </Pressable>
-                  <Pressable style={styles.exitButton} onPress={handleExitToHome}>
-                    <Text style={styles.buttonText}>Exit</Text>
-                  </Pressable>
-                </View>
-              </View>
-            </View>
-          )}
+        {screen === 'game' ? (
+          <>
+            <GameCanvas
+              key={gameKey}
+              onExit={handleExitToHome}
+              onGameOver={handleSinglePlayerGameOver}
+              onAudioEvent={triggerSound}
+              backgroundIndex={backgroundIndex}
+              terrainTheme={terrainTheme}
+              initialGravityDirection={localInitialGravityDirection}
+              opponentInitialGravityDirection={opponentInitialGravityDirection}
+              opponentSnapshotValue={mode === 'multi' ? opponentSnapshotValue : undefined}
+              opponentName={mode === 'multi' ? multiplayerState.opponent?.nickname : undefined}
+              opponentConnectionState={
+                mode === 'multi' ? multiplayerState.connectionState : 'connected'
+              }
+              onFlipInput={mode === 'multi' ? handleFlipInput : undefined}
+              onLocalState={mode === 'multi' ? handleLocalState : undefined}
+              onLocalDeath={mode === 'multi' ? handleLocalDeath : undefined}
+            />
 
-          {mode === 'multi' && (
-            <>
-              {localMultiplayerDeathScore !== null && !multiplayerResult && (
-                <View style={styles.statusChipWrap}>
-                  <View style={styles.statusChip}>
-                    <Text style={styles.statusChipText}>
-                      You are down. Waiting for server result…
-                    </Text>
+            {mode === 'single' && gameOver && (
+              <View style={styles.gameOverOverlay}>
+                <View style={styles.gameOverBackdrop} />
+                <View style={styles.gameOverModal}>
+                  <Text style={styles.gameOverTitle}>Game Over</Text>
+                  <Text style={styles.gameOverSubtitle}>You fell into the ditch!</Text>
+                  <Text style={styles.scoreText}>Score: {lastResult?.playerScore ?? 0}m</Text>
+                  <View style={styles.gameOverButtons}>
+                    <Pressable style={styles.restartButton} onPress={handleRestart}>
+                      <Text style={styles.buttonText}>Restart</Text>
+                    </Pressable>
+                    <Pressable style={styles.exitButton} onPress={handleExitToHome}>
+                      <Text style={styles.buttonText}>Exit</Text>
+                    </Pressable>
                   </View>
                 </View>
-              )}
+              </View>
+            )}
 
-              {multiplayerState.connectionState === 'forfeit_pending' &&
-                multiplayerState.reconnectSecondsRemaining !== null && (
+            {mode === 'multi' && (
+              <>
+                {localMultiplayerDeathScore !== null && !multiplayerResult && (
                   <View style={styles.statusChipWrap}>
-                    <View style={styles.warningChip}>
+                    <View style={styles.statusChip}>
                       <Text style={styles.statusChipText}>
-                        Reconnect in {multiplayerState.reconnectSecondsRemaining}s or forfeit
+                        You are down. Waiting for server result…
                       </Text>
                     </View>
                   </View>
                 )}
 
-              {multiplayerResult && (
-                <View style={styles.gameOverOverlay}>
-                  <View style={styles.gameOverBackdrop} />
-                  <View style={styles.gameOverModal}>
-                    <Text style={styles.gameOverTitle}>{didWin ? 'You Win' : 'You Lose'}</Text>
-                    <Text style={styles.gameOverSubtitle}>Reason: {multiplayerResult.reason}</Text>
-                    <View style={styles.gameOverButtons}>
-                      <Pressable
-                        style={styles.restartButton}
-                        onPress={() => {
-                          multiplayerController.resetLobbyState();
-                          setLocalMultiplayerDeathScore(null);
-                          setScreen('lobby');
-                        }}>
-                        <Text style={styles.buttonText}>Lobby</Text>
-                      </Pressable>
-                      <Pressable style={styles.exitButton} onPress={handleExitToHome}>
-                        <Text style={styles.buttonText}>Exit</Text>
-                      </Pressable>
+                {multiplayerState.connectionState === 'forfeit_pending' &&
+                  multiplayerState.reconnectSecondsRemaining !== null && (
+                    <View style={styles.statusChipWrap}>
+                      <View style={styles.warningChip}>
+                        <Text style={styles.statusChipText}>
+                          Reconnect in {multiplayerState.reconnectSecondsRemaining}s or forfeit
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+
+                {multiplayerResult && (
+                  <View style={styles.gameOverOverlay}>
+                    <View style={styles.gameOverBackdrop} />
+                    <View style={styles.gameOverModal}>
+                      <Text style={styles.gameOverTitle}>{didWin ? 'You Win' : 'You Lose'}</Text>
+                      <Text style={styles.gameOverSubtitle}>
+                        Reason: {multiplayerResult.reason}
+                      </Text>
+                      <View style={styles.gameOverButtons}>
+                        <Pressable
+                          style={styles.restartButton}
+                          onPress={() => {
+                            multiplayerController.resetLobbyState();
+                            setLocalMultiplayerDeathScore(null);
+                            setScreen('lobby');
+                          }}>
+                          <Text style={styles.buttonText}>Lobby</Text>
+                        </Pressable>
+                        <Pressable style={styles.exitButton} onPress={handleExitToHome}>
+                          <Text style={styles.buttonText}>Exit</Text>
+                        </Pressable>
+                      </View>
                     </View>
                   </View>
-                </View>
-              )}
-            </>
-          )}
-        </>
-      ) : null}
+                )}
+              </>
+            )}
+          </>
+        ) : null}
 
-      <View style={styles.audioControlWrapper}>
-        <Pressable style={styles.audioToggleButton} onPress={handleToggleMute}>
-          <Text style={styles.audioToggleText}>{isMuted ? 'SOUND OFF' : 'SOUND ON'}</Text>
-        </Pressable>
-      </View>
+        <View style={styles.audioControlWrapper}>
+          <Pressable style={styles.audioToggleButton} onPress={handleToggleMute}>
+            <Text style={styles.audioToggleText}>{isMuted ? 'SOUND OFF' : 'SOUND ON'}</Text>
+          </Pressable>
+        </View>
 
-      <StatusBar style="auto" />
-    </GestureHandlerRootView>
+        <StatusBar style="auto" />
+      </GestureHandlerRootView>
+    </SafeAreaProvider>
   );
 }
 
