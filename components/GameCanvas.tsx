@@ -255,7 +255,9 @@ export const GameCanvas = ({
   const {
     characterImage,
     characterTransforms,
+    characterRenderTransform,
     opponentTransforms,
+    opponentRenderTransform,
     characterSprites,
     backgroundPicture,
     backgroundTransform,
@@ -426,18 +428,22 @@ export const GameCanvas = ({
             </Group>
           )}
           {characterImage && (
-            <Atlas
-              image={characterImage}
-              sprites={characterSprites}
-              transforms={characterTransforms}
-            />
+            <Group transform={characterRenderTransform}>
+              <Atlas
+                image={characterImage}
+                sprites={characterSprites}
+                transforms={characterTransforms}
+              />
+            </Group>
           )}
           {characterImage ? (
-            <Atlas
-              image={characterImage}
-              sprites={characterSprites}
-              transforms={opponentTransforms}
-            />
+            <Group transform={opponentRenderTransform}>
+              <Atlas
+                image={characterImage}
+                sprites={characterSprites}
+                transforms={opponentTransforms}
+              />
+            </Group>
           ) : null}
           {ENABLE_COLLIDER_DEBUG_UI && debugOverlay && (
             <>

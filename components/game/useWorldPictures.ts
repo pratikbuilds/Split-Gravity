@@ -176,11 +176,7 @@ export const useWorldPictures = ({
       gDir === -1
         ? refs.posY.value - feetTrim
         : refs.posY.value + (hitboxSize - renderHeight) + feetTrim;
-    if (gDir === -1) {
-      val.set(-scale, 0, baseX + renderWidth, baseY + renderHeight);
-    } else {
-      val.set(scale, 0, baseX, baseY);
-    }
+    val.set(scale, 0, baseX, baseY);
   });
 
   const opponentTransforms = useRSXformBuffer(1, (val) => {
@@ -208,11 +204,51 @@ export const useWorldPictures = ({
       gDir === -1
         ? refs.opponentPosY.value - feetTrim
         : refs.opponentPosY.value + (hitboxSize - renderHeight) + feetTrim;
-    if (gDir === -1) {
-      val.set(-scale, 0, baseX + renderWidth, baseY + renderHeight);
-    } else {
-      val.set(scale, 0, baseX, baseY);
-    }
+    val.set(scale, 0, baseX, baseY);
+  });
+
+  const characterRenderTransform = useDerivedValue(() => {
+    const gDir = refs.gravityDirection.value;
+    if (gDir !== -1) return [{ translateY: 0 }];
+
+    const frame = resolveCharacterFrame(
+      refs.countdownLocked.value,
+      refs.flipLockedUntilLanding.value,
+      refs.velocityY.value,
+      refs.frameIndex.value
+    );
+    const airborne = isAirborne(refs.flipLockedUntilLanding.value, refs.velocityY.value);
+    const hitboxSize = CHAR_SIZE * CHAR_SCALE;
+    const scaleBoost = airborne ? JUMP_SCALE_BOOST : 1;
+    const targetRenderHeight = hitboxSize * CHARACTER_RENDER_SCALE_MULTIPLIER * scaleBoost;
+    const scale = targetRenderHeight / frame.height;
+    const feetTrim = CHARACTER_FEET_TRIM_PX * scale;
+    const renderHeight = frame.height * scale;
+    const baseY = refs.posY.value - feetTrim;
+    const pivotY = baseY + renderHeight / 2;
+
+    return [{ translateY: pivotY }, { scaleY: -1 }, { translateY: -pivotY }];
+  });
+
+  const opponentRenderTransform = useDerivedValue(() => {
+    const gDir = refs.opponentGravity.value;
+    if (gDir !== -1) return [{ translateY: 0 }];
+
+    const frame = resolveCharacterFrame(
+      refs.countdownLocked.value,
+      refs.flipLockedUntilLanding.value,
+      refs.velocityY.value,
+      refs.frameIndex.value
+    );
+    const hitboxSize = CHAR_SIZE * CHAR_SCALE;
+    const targetRenderHeight = hitboxSize * CHARACTER_RENDER_SCALE_MULTIPLIER;
+    const scale = targetRenderHeight / frame.height;
+    const feetTrim = CHARACTER_FEET_TRIM_PX * scale;
+    const renderHeight = frame.height * scale;
+    const baseY = refs.opponentPosY.value - feetTrim;
+    const pivotY = baseY + renderHeight / 2;
+
+    return [{ translateY: pivotY }, { scaleY: -1 }, { translateY: -pivotY }];
   });
 
   const characterSprites = useDerivedValue(() => {
@@ -531,7 +567,9 @@ export const useWorldPictures = ({
   return {
     characterImage,
     characterTransforms,
+    characterRenderTransform,
     opponentTransforms,
+    opponentRenderTransform,
     characterSprites,
     backgroundPicture,
     backgroundTransform,
