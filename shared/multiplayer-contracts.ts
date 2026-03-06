@@ -1,3 +1,5 @@
+import type { CharacterId } from './characters';
+
 export type MatchState = 'ROOM_OPEN' | 'ROOM_FULL' | 'READY' | 'COUNTDOWN' | 'RUNNING' | 'ENDED';
 
 export type ConnectionState = 'connected' | 'reconnecting' | 'forfeit_pending';
@@ -6,6 +8,7 @@ export interface PlayerSession {
   playerId: string;
   clientId: string;
   nickname: string;
+  characterId: CharacterId;
   alive: boolean;
   connected: boolean;
 }
@@ -47,12 +50,14 @@ export interface MatchResult {
 export interface RoomCreatePayload {
   nickname: string;
   clientId: string;
+  characterId: CharacterId;
 }
 
 export interface RoomJoinPayload {
   roomCode: string;
   nickname: string;
   clientId: string;
+  characterId: CharacterId;
 }
 
 export interface RoomReadyPayload {

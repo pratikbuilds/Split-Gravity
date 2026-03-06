@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Asset } from 'expo-asset';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSharedValue } from 'react-native-reanimated';
+import { CharacterSelectScreen } from 'components/CharacterSelectScreen';
 import { GameCanvas } from 'components/GameCanvas';
+import { GAME_STARTUP_ASSETS } from 'components/game/worldAssetSources';
 import { HomeScreen } from 'components/HomeScreen';
 import { LobbyScreen } from 'components/multiplayer/LobbyScreen';
+import { DEFAULT_CHARACTER_ID, isCharacterId, type CharacterId } from './shared/characters';
 import { getRandomBackgroundIndex } from './utils/backgrounds';
 import type {
   GameAudioEvent,
@@ -31,6 +36,7 @@ import {
 import './global.css';
 
 const TERRAIN_THEMES: TerrainTheme[] = ['grass', 'purple', 'stone'];
+const SELECTED_CHARACTER_STORAGE_KEY = 'my-expo-app:selected-character-id';
 
 function getRandomTerrainTheme(previousTheme?: TerrainTheme): TerrainTheme {
   if (TERRAIN_THEMES.length === 1) return TERRAIN_THEMES[0];
@@ -41,13 +47,14 @@ function getRandomTerrainTheme(previousTheme?: TerrainTheme): TerrainTheme {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<'home' | 'lobby' | 'game'>('home');
+  const [screen, setScreen] = useState<'home' | 'character_select' | 'lobby' | 'game'>('home');
   const [mode, setMode] = useState<GameMode>('single');
   const [gameKey, setGameKey] = useState(0);
   const [lastResult, setLastResult] = useState<GameResult | null>(null);
   const [gameOver, setGameOver] = useState(false);
   const [backgroundIndex, setBackgroundIndex] = useState(() => getRandomBackgroundIndex());
   const [terrainTheme, setTerrainTheme] = useState<TerrainTheme>(() => getRandomTerrainTheme());
+  const [selectedCharacterId, setSelectedCharacterId] = useState<CharacterId>(DEFAULT_CHARACTER_ID);
   const [isMuted, setIsMuted] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
   const [localMultiplayerDeathScore, setLocalMultiplayerDeathScore] = useState<number | null>(null);
@@ -74,6 +81,24 @@ export default function App() {
   const isMutedRef = useRef(isMuted);
   isMutedRef.current = isMuted;
   const soundsRef = useRef<Awaited<ReturnType<typeof loadSounds>> | null>(null);
+  const startupAssetsPromiseRef = useRef<Promise<void> | null>(null);
+
+  const ensureStartupAssetsReady = useCallback(async () => {
+    if (!startupAssetsPromiseRef.current) {
+      startupAssetsPromiseRef.current = Asset.loadAsync(GAME_STARTUP_ASSETS)
+        .then(() => undefined)
+        .catch((error) => {
+          startupAssetsPromiseRef.current = null;
+          throw error;
+        });
+    }
+
+    try {
+      await startupAssetsPromiseRef.current;
+    } catch (error) {
+      console.warn('Game startup asset preload failed:', error);
+    }
+  }, []);
 
   const triggerSound = useCallback(
     (event: GameAudioEvent) => {
@@ -84,6 +109,36 @@ export default function App() {
     },
     [audioReady]
   );
+
+  useEffect(() => {
+    void ensureStartupAssetsReady();
+  }, [ensureStartupAssetsReady]);
+
+  useEffect(() => {
+    let active = true;
+
+    const hydrateSelectedCharacter = async () => {
+      try {
+        const storedCharacterId = await AsyncStorage.getItem(SELECTED_CHARACTER_STORAGE_KEY);
+        if (!active || !storedCharacterId) return;
+
+        if (isCharacterId(storedCharacterId)) {
+          setSelectedCharacterId(storedCharacterId);
+          return;
+        }
+
+        await AsyncStorage.setItem(SELECTED_CHARACTER_STORAGE_KEY, DEFAULT_CHARACTER_ID);
+      } catch (error) {
+        console.warn('Character selection storage unavailable:', error);
+      }
+    };
+
+    void hydrateSelectedCharacter();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const unsubscribe = multiplayerController.subscribe((state) => {
@@ -111,14 +166,27 @@ export default function App() {
     if (multiplayerState.matchStatus !== 'running') return;
     if (!hasMultiplayerPair) return;
 
-    setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
-    setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
-    setLocalMultiplayerDeathScore(null);
-    setGameOver(false);
-    setLastResult(null);
-    setGameKey((k) => k + 1);
-    setScreen('game');
-  }, [hasMultiplayerPair, mode, multiplayerState.matchStatus]);
+    let cancelled = false;
+
+    const startMultiplayerGame = async () => {
+      await ensureStartupAssetsReady();
+      if (cancelled) return;
+
+      setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
+      setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
+      setLocalMultiplayerDeathScore(null);
+      setGameOver(false);
+      setLastResult(null);
+      setGameKey((k) => k + 1);
+      setScreen('game');
+    };
+
+    void startMultiplayerGame();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ensureStartupAssetsReady, hasMultiplayerPair, mode, multiplayerState.matchStatus]);
 
   useEffect(() => {
     let mounted = true;
@@ -154,14 +222,16 @@ export default function App() {
     setGameOver(true);
   };
 
-  const handleRestart = () => {
+  const handleRestart = async () => {
+    await ensureStartupAssetsReady();
     setGameOver(false);
     setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
     setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
     setGameKey((k) => k + 1);
   };
 
-  const handleSinglePlay = () => {
+  const handleSinglePlay = async () => {
+    await ensureStartupAssetsReady();
     setMode('single');
     setGameOver(false);
     setLastResult(null);
@@ -179,6 +249,24 @@ export default function App() {
     multiplayerController.resetLobbyState();
     setScreen('lobby');
   };
+
+  const handleOpenCharacterSelect = useCallback(() => {
+    setScreen('character_select');
+  }, []);
+
+  const handleReturnHome = useCallback(() => {
+    setScreen('home');
+  }, []);
+
+  const handleConfirmCharacter = useCallback(async (characterId: CharacterId) => {
+    setSelectedCharacterId(characterId);
+    setScreen('home');
+    try {
+      await AsyncStorage.setItem(SELECTED_CHARACTER_STORAGE_KEY, characterId);
+    } catch (error) {
+      console.warn('Persisting character selection failed:', error);
+    }
+  }, []);
 
   const handleExitToHome = () => {
     triggerSound('land');
@@ -199,16 +287,16 @@ export default function App() {
 
   const handleCreateRoom = useCallback(
     (nickname: string) => {
-      multiplayerController.createRoom(nickname);
+      multiplayerController.createRoom(nickname, selectedCharacterId);
     },
-    [multiplayerController]
+    [multiplayerController, selectedCharacterId]
   );
 
   const handleJoinRoom = useCallback(
     (roomCode: string, nickname: string) => {
-      multiplayerController.joinRoom(roomCode, nickname);
+      multiplayerController.joinRoom(roomCode, nickname, selectedCharacterId);
     },
-    [multiplayerController]
+    [multiplayerController, selectedCharacterId]
   );
 
   const handleReadyRoom = useCallback(() => {
@@ -252,7 +340,20 @@ export default function App() {
     <SafeAreaProvider>
       <GestureHandlerRootView style={styles.root}>
         {screen === 'home' ? (
-          <HomeScreen onSinglePlay={handleSinglePlay} onMultiplay={handleMultiplay} />
+          <HomeScreen
+            selectedCharacterId={selectedCharacterId}
+            onSinglePlay={handleSinglePlay}
+            onMultiplay={handleMultiplay}
+            onOpenCharacterSelect={handleOpenCharacterSelect}
+          />
+        ) : null}
+
+        {screen === 'character_select' ? (
+          <CharacterSelectScreen
+            selectedCharacterId={selectedCharacterId}
+            onBack={handleReturnHome}
+            onConfirm={handleConfirmCharacter}
+          />
         ) : null}
 
         {screen === 'lobby' ? (
@@ -275,6 +376,10 @@ export default function App() {
               backgroundIndex={backgroundIndex}
               terrainTheme={terrainTheme}
               initialGravityDirection={localInitialGravityDirection}
+              characterId={selectedCharacterId}
+              opponentCharacterId={
+                mode === 'multi' ? multiplayerState.opponent?.characterId : undefined
+              }
               opponentInitialGravityDirection={opponentInitialGravityDirection}
               opponentSnapshotValue={mode === 'multi' ? opponentSnapshotValue : undefined}
               opponentName={mode === 'multi' ? multiplayerState.opponent?.nickname : undefined}
@@ -358,7 +463,7 @@ export default function App() {
           </>
         ) : null}
 
-        <View style={styles.audioControlWrapper}>
+        <View pointerEvents="box-none" style={styles.audioControlWrapper}>
           <Pressable style={styles.audioToggleButton} onPress={handleToggleMute}>
             <Text style={styles.audioToggleText}>{isMuted ? 'SOUND OFF' : 'SOUND ON'}</Text>
           </Pressable>

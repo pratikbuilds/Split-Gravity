@@ -20,8 +20,9 @@ import { useGameGestures } from './game/useGameGestures';
 import { useGameSimulation } from './game/useGameSimulation';
 import { useScoreAndChunks } from './game/useScoreAndChunks';
 
-import type { GameCanvasProps,GravityDirection, SimulationRefs } from './game/types';
+import type { GameCanvasProps, GravityDirection, SimulationRefs } from './game/types';
 import { useWorldPictures } from './game/useWorldPictures';
+import { COUNTDOWN_DIGIT_ASSETS } from './game/worldAssetSources';
 
 const SCORE_DISPLAY_BUCKET = 10;
 const OPPONENT_SCORE_DISPLAY_BUCKET = 10;
@@ -195,9 +196,17 @@ const DebugOverlay = React.memo(
       <>
         <Line p1={{ x: 0, y: groundHeight }} p2={{ x: width, y: groundHeight }} color="#f59e0b" />
         <Line p1={{ x: 0, y: stableGroundY }} p2={{ x: width, y: stableGroundY }} color="#f59e0b" />
-        <Line p1={{ x: 0, y: deathLineBottom }} p2={{ x: width, y: deathLineBottom }} color="#ef4444" />
+        <Line
+          p1={{ x: 0, y: deathLineBottom }}
+          p2={{ x: width, y: deathLineBottom }}
+          color="#ef4444"
+        />
         <Line p1={{ x: 0, y: deathLineTop }} p2={{ x: width, y: deathLineTop }} color="#ef4444" />
-        <Line p1={{ x: overlay.flatZoneX, y: 0 }} p2={{ x: overlay.flatZoneX, y: height }} color="#22c55e" />
+        <Line
+          p1={{ x: overlay.flatZoneX, y: 0 }}
+          p2={{ x: overlay.flatZoneX, y: height }}
+          color="#22c55e"
+        />
 
         <Rect
           x={overlay.playerX}
@@ -250,6 +259,8 @@ export const GameCanvas = ({
   backgroundIndex = 0,
   terrainTheme = 'grass',
   initialGravityDirection = 1,
+  characterId,
+  opponentCharacterId,
   opponentInitialGravityDirection,
   opponentSnapshotValue,
   opponentConnectionState = 'connected',
@@ -258,7 +269,7 @@ export const GameCanvas = ({
   onLocalState,
   onLocalDeath,
 }: GameCanvasProps) => {
-  const [countdownDigit, setCountdownDigit] = useState<3 | 2 | 1 | null>(3);
+  const [countdownDigit, setCountdownDigit] = useState<3 | 2 | 1 | null>(null);
   const { width, height } = useWindowDimensions();
 
   const groundY = useSharedValue(0);
@@ -384,7 +395,9 @@ export const GameCanvas = ({
   });
 
   const {
+    worldAssetsReady,
     characterImage,
+    opponentImage,
     characterTransforms,
     characterRenderTransform,
     opponentTransforms,
@@ -401,6 +414,8 @@ export const GameCanvas = ({
     height,
     backgroundIndex,
     terrainTheme,
+    characterId,
+    opponentCharacterId,
     platforms,
     refs,
   });
@@ -428,6 +443,12 @@ export const GameCanvas = ({
     countdownLocked.value = 1;
     refs.initialized.value = 0;
     refs.velocityX.value = 0;
+    setCountdownDigit(null);
+
+    if (!worldAssetsReady) {
+      return;
+    }
+
     setCountdownDigit(3);
     triggerAudioEvent('countdown_tick');
 
@@ -455,17 +476,17 @@ export const GameCanvas = ({
     return () => {
       clearInterval(timer);
     };
-  }, [countdownLocked, refs.initialized, refs.velocityX, triggerAudioEvent]);
+  }, [countdownLocked, refs.initialized, refs.velocityX, triggerAudioEvent, worldAssetsReady]);
 
   const countdownImageSource = useMemo(() => {
     if (countdownDigit === 1) {
-      return require('../assets/game/hud/hud_character_1.png');
+      return COUNTDOWN_DIGIT_ASSETS[1];
     }
     if (countdownDigit === 2) {
-      return require('../assets/game/hud/hud_character_2.png');
+      return COUNTDOWN_DIGIT_ASSETS[2];
     }
     if (countdownDigit === 3) {
-      return require('../assets/game/hud/hud_character_3.png');
+      return COUNTDOWN_DIGIT_ASSETS[3];
     }
     return null;
   }, [countdownDigit]);
@@ -520,22 +541,22 @@ export const GameCanvas = ({
 
       <GestureDetector gesture={tapGesture}>
         <Canvas style={styles.canvas}>
-          {backgroundPicture && (
+          {worldAssetsReady && backgroundPicture && (
             <Group transform={backgroundTransform}>
               <Picture picture={backgroundPicture} />
             </Group>
           )}
-          {platformsPicture && (
+          {worldAssetsReady && platformsPicture && (
             <Group transform={platformsTransform}>
               <Picture picture={platformsPicture} />
             </Group>
           )}
-          {colliderDebugPicture && (
+          {worldAssetsReady && colliderDebugPicture && (
             <Group transform={platformsTransform}>
               <Picture picture={colliderDebugPicture} />
             </Group>
           )}
-          {characterImage && (
+          {worldAssetsReady && characterImage && (
             <Group transform={characterRenderTransform}>
               <Atlas
                 image={characterImage}
@@ -544,16 +565,16 @@ export const GameCanvas = ({
               />
             </Group>
           )}
-          {characterImage ? (
+          {worldAssetsReady && opponentImage ? (
             <Group transform={opponentRenderTransform}>
               <Atlas
-                image={characterImage}
+                image={opponentImage}
                 sprites={opponentSprites}
                 transforms={opponentTransforms}
               />
             </Group>
           ) : null}
-          {ENABLE_COLLIDER_DEBUG_UI && (
+          {worldAssetsReady && ENABLE_COLLIDER_DEBUG_UI && (
             <DebugOverlay
               refs={refs}
               width={width}
@@ -595,10 +616,11 @@ export const GameCanvas = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#add8e6',
+    backgroundColor: '#000000',
   },
   canvas: {
     flex: 1,
+    backgroundColor: '#000000',
   },
   scoreWrapper: {
     position: 'absolute',

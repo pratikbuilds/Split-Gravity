@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Skia, createPicture, rect, useImage, useRSXformBuffer } from '@shopify/react-native-skia';
 import { useDerivedValue } from 'react-native-reanimated';
 import type { Platform, TerrainTheme } from '../../types/game';
+import type { CharacterId } from '../../shared/characters';
 import { isSurfaceEdgeGap } from '../../shared/game/terrainAutotile';
 import { GAME_BACKGROUNDS } from '../../utils/backgrounds';
 import {
@@ -13,24 +14,29 @@ import {
   PLAYER_X_FACTOR,
   tileSize,
 } from './constants';
-import { ACTIVE_CHARACTER_PRESET, type SpriteFrame } from './characterSpritePresets';
+import {
+  getCharacterPresetOrDefault,
+  type CharacterSpritePreset,
+  type SpriteFrame,
+} from './characterSpritePresets';
 import type { SimulationRefs } from './types';
+import { MIDDLE_PLATFORM_ASSETS, TERRAIN_TILE_ASSETS } from './worldAssetSources';
 
 type SrcClipAnchor = 'start' | 'end';
-const CHARACTER_RENDER_SCALE_MULTIPLIER = ACTIVE_CHARACTER_PRESET.renderScaleMultiplier;
-const CHARACTER_FEET_TRIM_PX = ACTIVE_CHARACTER_PRESET.feetTrimPx;
-
-const IDLE_FRAMES = ACTIVE_CHARACTER_PRESET.actions.idle;
-const RUN_FRAMES = ACTIVE_CHARACTER_PRESET.actions.run;
-const JUMP_FRAMES = ACTIVE_CHARACTER_PRESET.actions.jump;
-const FALL_FRAMES = ACTIVE_CHARACTER_PRESET.actions.fall;
-const IDLE_SLOWDOWN = ACTIVE_CHARACTER_PRESET.frameSlowdowns.idle;
-const JUMP_SLOWDOWN = ACTIVE_CHARACTER_PRESET.frameSlowdowns.jump;
-const FALL_SLOWDOWN = ACTIVE_CHARACTER_PRESET.frameSlowdowns.fall;
 const AIRBORNE_VEL_THRESHOLD = 10;
 const JUMP_SCALE_BOOST = 1.3;
 
+const resolveAnimatedFrame = (
+  frames: readonly SpriteFrame[],
+  slowdown: number,
+  frameIndex: number
+): SpriteFrame => {
+  'worklet';
+  return frames[Math.floor(frameIndex / slowdown) % frames.length];
+};
+
 const resolveCharacterFrame = (
+  preset: CharacterSpritePreset,
   countdownLocked: number,
   flipLocked: number,
   velocityY: number,
@@ -38,15 +44,15 @@ const resolveCharacterFrame = (
 ): SpriteFrame => {
   'worklet';
   if (countdownLocked === 1) {
-    return IDLE_FRAMES[Math.floor(frameIndex / IDLE_SLOWDOWN) % IDLE_FRAMES.length];
+    return resolveAnimatedFrame(preset.actions.idle, preset.frameSlowdowns.idle, frameIndex);
   }
   if (flipLocked === 1) {
-    return JUMP_FRAMES[Math.floor(frameIndex / JUMP_SLOWDOWN) % JUMP_FRAMES.length];
+    return resolveAnimatedFrame(preset.actions.jump, preset.frameSlowdowns.jump, frameIndex);
   }
   if (Math.abs(velocityY) > AIRBORNE_VEL_THRESHOLD) {
-    return FALL_FRAMES[Math.floor(frameIndex / FALL_SLOWDOWN) % FALL_FRAMES.length];
+    return resolveAnimatedFrame(preset.actions.fall, preset.frameSlowdowns.fall, frameIndex);
   }
-  return RUN_FRAMES[frameIndex % RUN_FRAMES.length];
+  return preset.actions.run[frameIndex % preset.actions.run.length];
 };
 
 const isAirborne = (flipLocked: number, velocityY: number): boolean => {
@@ -54,41 +60,24 @@ const isAirborne = (flipLocked: number, velocityY: number): boolean => {
   return flipLocked === 1 || Math.abs(velocityY) > AIRBORNE_VEL_THRESHOLD;
 };
 
-const TERRAIN_TILE_ASSETS: Record<
-  TerrainTheme,
-  {
-    top: number;
-    topLeft: number;
-    topRight: number;
-    left: number;
-    center: number;
-    right: number;
-  }
-> = {
-  grass: {
-    top: require('../../assets/game/terrain/default/terrain_grass_block_top.png'),
-    topLeft: require('../../assets/game/terrain/default/terrain_grass_block_top_left.png'),
-    topRight: require('../../assets/game/terrain/default/terrain_grass_block_top_right.png'),
-    left: require('../../assets/game/terrain/default/terrain_grass_block_left.png'),
-    center: require('../../assets/game/terrain/default/terrain_grass_block_center.png'),
-    right: require('../../assets/game/terrain/default/terrain_grass_block_right.png'),
-  },
-  purple: {
-    top: require('../../assets/game/terrain/default/terrain_purple_block_top.png'),
-    topLeft: require('../../assets/game/terrain/default/terrain_purple_block_top_left.png'),
-    topRight: require('../../assets/game/terrain/default/terrain_purple_block_top_right.png'),
-    left: require('../../assets/game/terrain/default/terrain_purple_block_left.png'),
-    center: require('../../assets/game/terrain/default/terrain_purple_block_center.png'),
-    right: require('../../assets/game/terrain/default/terrain_purple_block_right.png'),
-  },
-  stone: {
-    top: require('../../assets/game/terrain/default/terrain_stone_block_top.png'),
-    topLeft: require('../../assets/game/terrain/default/terrain_stone_block_top_left.png'),
-    topRight: require('../../assets/game/terrain/default/terrain_stone_block_top_right.png'),
-    left: require('../../assets/game/terrain/default/terrain_stone_block_left.png'),
-    center: require('../../assets/game/terrain/default/terrain_stone_block_center.png'),
-    right: require('../../assets/game/terrain/default/terrain_stone_block_right.png'),
-  },
+const resolveRenderMetrics = (
+  preset: CharacterSpritePreset,
+  frame: SpriteFrame,
+  hitboxSize: number,
+  scaleBoost: number
+) => {
+  'worklet';
+  const targetRenderHeight = hitboxSize * preset.renderScaleMultiplier * scaleBoost;
+  const scale = targetRenderHeight / frame.height;
+  const feetTrim = preset.feetTrimPx * scale;
+  const renderWidth = frame.width * scale;
+  const renderHeight = frame.height * scale;
+  return {
+    scale,
+    feetTrim,
+    renderWidth,
+    renderHeight,
+  };
 };
 
 interface UseWorldPicturesArgs {
@@ -96,6 +85,8 @@ interface UseWorldPicturesArgs {
   height: number;
   backgroundIndex: number;
   terrainTheme: TerrainTheme;
+  characterId?: CharacterId;
+  opponentCharacterId?: CharacterId;
   platforms: Platform[];
   refs: Pick<
     SimulationRefs,
@@ -122,6 +113,8 @@ export const useWorldPictures = ({
   height,
   backgroundIndex,
   terrainTheme,
+  characterId,
+  opponentCharacterId,
   platforms,
   refs,
 }: UseWorldPicturesArgs) => {
@@ -147,20 +140,18 @@ export const useWorldPictures = ({
   const terrainLeftImage = useImage(terrainAssets.left);
   const terrainCenterImage = useImage(terrainAssets.center);
   const terrainRightImage = useImage(terrainAssets.right);
-  const middlePlatformLeftImage = useImage(
-    require('../../assets/platform assets/Tiles/tile_0048.png')
-  );
-  const middlePlatformCenterImage = useImage(
-    require('../../assets/platform assets/Tiles/tile_0049.png')
-  );
-  const middlePlatformRightImage = useImage(
-    require('../../assets/platform assets/Tiles/tile_0050.png')
-  );
-  const characterImage = useImage(ACTIVE_CHARACTER_PRESET.imageSource);
+  const middlePlatformLeftImage = useImage(MIDDLE_PLATFORM_ASSETS.left);
+  const middlePlatformCenterImage = useImage(MIDDLE_PLATFORM_ASSETS.center);
+  const middlePlatformRightImage = useImage(MIDDLE_PLATFORM_ASSETS.right);
+  const characterPreset = getCharacterPresetOrDefault(characterId);
+  const opponentPreset = getCharacterPresetOrDefault(opponentCharacterId);
+  const characterImage = useImage(characterPreset.imageSource);
+  const opponentImage = useImage(opponentPreset.imageSource);
 
   const characterTransforms = useRSXformBuffer(1, (val) => {
     'worklet';
     const frame = resolveCharacterFrame(
+      characterPreset,
       refs.countdownLocked.value,
       refs.flipLockedUntilLanding.value,
       refs.velocityY.value,
@@ -169,11 +160,12 @@ export const useWorldPictures = ({
     const airborne = isAirborne(refs.flipLockedUntilLanding.value, refs.velocityY.value);
     const hitboxSize = CHAR_SIZE * CHAR_SCALE;
     const scaleBoost = airborne ? JUMP_SCALE_BOOST : 1;
-    const targetRenderHeight = hitboxSize * CHARACTER_RENDER_SCALE_MULTIPLIER * scaleBoost;
-    const scale = targetRenderHeight / frame.height;
-    const feetTrim = CHARACTER_FEET_TRIM_PX * scale;
-    const renderWidth = frame.width * scale;
-    const renderHeight = frame.height * scale;
+    const { scale, feetTrim, renderWidth, renderHeight } = resolveRenderMetrics(
+      characterPreset,
+      frame,
+      hitboxSize,
+      scaleBoost
+    );
     const baseX = refs.charX.value + (hitboxSize - renderWidth) / 2;
     const gDir = refs.gravityDirection.value;
     const baseY =
@@ -190,17 +182,19 @@ export const useWorldPictures = ({
       return;
     }
     const frame = resolveCharacterFrame(
+      opponentPreset,
       refs.opponentCountdownLocked.value,
       refs.opponentFlipLocked.value,
       refs.opponentVelocityY.value,
       refs.opponentFrameIndex.value
     );
     const hitboxSize = CHAR_SIZE * CHAR_SCALE;
-    const targetRenderHeight = hitboxSize * CHARACTER_RENDER_SCALE_MULTIPLIER;
-    const scale = targetRenderHeight / frame.height;
-    const feetTrim = CHARACTER_FEET_TRIM_PX * scale;
-    const renderWidth = frame.width * scale;
-    const renderHeight = frame.height * scale;
+    const { scale, feetTrim, renderWidth, renderHeight } = resolveRenderMetrics(
+      opponentPreset,
+      frame,
+      hitboxSize,
+      1
+    );
     const ox = width * OPPONENT_X_FACTOR;
     const baseX = ox + (hitboxSize - renderWidth) / 2;
     const gDir = refs.opponentGravity.value;
@@ -216,6 +210,7 @@ export const useWorldPictures = ({
     if (gDir !== -1) return [{ translateY: 0 }];
 
     const frame = resolveCharacterFrame(
+      characterPreset,
       refs.countdownLocked.value,
       refs.flipLockedUntilLanding.value,
       refs.velocityY.value,
@@ -224,10 +219,12 @@ export const useWorldPictures = ({
     const airborne = isAirborne(refs.flipLockedUntilLanding.value, refs.velocityY.value);
     const hitboxSize = CHAR_SIZE * CHAR_SCALE;
     const scaleBoost = airborne ? JUMP_SCALE_BOOST : 1;
-    const targetRenderHeight = hitboxSize * CHARACTER_RENDER_SCALE_MULTIPLIER * scaleBoost;
-    const scale = targetRenderHeight / frame.height;
-    const feetTrim = CHARACTER_FEET_TRIM_PX * scale;
-    const renderHeight = frame.height * scale;
+    const { feetTrim, renderHeight } = resolveRenderMetrics(
+      characterPreset,
+      frame,
+      hitboxSize,
+      scaleBoost
+    );
     const baseY = refs.posY.value - feetTrim;
     const pivotY = baseY + renderHeight / 2;
 
@@ -239,16 +236,14 @@ export const useWorldPictures = ({
     if (gDir !== -1) return [{ translateY: 0 }];
 
     const frame = resolveCharacterFrame(
+      opponentPreset,
       refs.opponentCountdownLocked.value,
       refs.opponentFlipLocked.value,
       refs.opponentVelocityY.value,
       refs.opponentFrameIndex.value
     );
     const hitboxSize = CHAR_SIZE * CHAR_SCALE;
-    const targetRenderHeight = hitboxSize * CHARACTER_RENDER_SCALE_MULTIPLIER;
-    const scale = targetRenderHeight / frame.height;
-    const feetTrim = CHARACTER_FEET_TRIM_PX * scale;
-    const renderHeight = frame.height * scale;
+    const { feetTrim, renderHeight } = resolveRenderMetrics(opponentPreset, frame, hitboxSize, 1);
     const baseY = refs.opponentPosY.value - feetTrim;
     const pivotY = baseY + renderHeight / 2;
 
@@ -257,6 +252,7 @@ export const useWorldPictures = ({
 
   const characterSprites = useDerivedValue(() => {
     const frame = resolveCharacterFrame(
+      characterPreset,
       refs.countdownLocked.value,
       refs.flipLockedUntilLanding.value,
       refs.velocityY.value,
@@ -267,6 +263,7 @@ export const useWorldPictures = ({
 
   const opponentSprites = useDerivedValue(() => {
     const frame = resolveCharacterFrame(
+      opponentPreset,
       refs.opponentCountdownLocked.value,
       refs.opponentFlipLocked.value,
       refs.opponentVelocityY.value,
@@ -577,9 +574,18 @@ export const useWorldPictures = ({
   });
 
   const opponentVisible = useDerivedValue(() => refs.opponentAlive.value === 1);
+  const worldAssetsReady =
+    backgroundPicture !== null &&
+    platformsPicture !== null &&
+    characterImage !== null &&
+    opponentImage !== null &&
+    width > 0 &&
+    height > 0;
 
   return {
+    worldAssetsReady,
     characterImage,
+    opponentImage,
     characterTransforms,
     characterRenderTransform,
     opponentTransforms,

@@ -1,4 +1,5 @@
 import type { SharedValue } from 'react-native-reanimated';
+import type { CharacterId } from '../../shared/characters';
 import type {
   Chunk,
   GameAudioEvent,
@@ -17,6 +18,8 @@ export type GameCanvasProps = {
   backgroundIndex?: number;
   terrainTheme?: TerrainTheme;
   initialGravityDirection?: GravityDirection;
+  characterId?: CharacterId;
+  opponentCharacterId?: CharacterId;
   opponentInitialGravityDirection?: GravityDirection;
   opponentSnapshotValue?: SharedValue<OpponentSnapshot | null>;
   opponentConnectionState?: 'connected' | 'reconnecting' | 'forfeit_pending';

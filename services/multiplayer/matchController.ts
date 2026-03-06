@@ -2,8 +2,11 @@ import type {
   MatchResult,
   MatchStatePacket,
   PlayerSession,
+  RoomCreatePayload,
+  RoomJoinPayload,
   RoomSnapshot,
 } from '../../shared/multiplayer-contracts';
+import type { CharacterId } from '../../shared/characters';
 import { NativeModules, Platform } from 'react-native';
 import type { MatchStatus, MultiplayerResult, OpponentSnapshot } from '../../types/game';
 import { createMultiplayerSocket, type MultiplayerSocket } from './socketClient';
@@ -45,8 +48,7 @@ const initialViewState: MultiplayerViewState = {
 };
 
 const FALLBACK_SERVER_PORT = 4100;
-const DEFAULT_MULTIPLAYER_SERVER_URL =
-  'https://multiplayer-server-production-839e.up.railway.app';
+const DEFAULT_MULTIPLAYER_SERVER_URL = 'https://multiplayer-server-production-839e.up.railway.app';
 
 const resolveConfiguredServerUrl = () => {
   const configuredUrl = process.env.EXPO_PUBLIC_MULTIPLAYER_URL?.trim();
@@ -82,8 +84,8 @@ export class MultiplayerMatchController {
   private opponentListeners = new Set<(snapshot: OpponentSnapshot | null) => void>();
   private state: MultiplayerViewState = initialViewState;
   private clientId: string;
-  private pendingCreate: { nickname: string; clientId: string } | null = null;
-  private pendingJoin: { roomCode: string; nickname: string; clientId: string } | null = null;
+  private pendingCreate: RoomCreatePayload | null = null;
+  private pendingJoin: RoomJoinPayload | null = null;
   private lastStateSentAt = 0;
   private lastSentState: Omit<MatchStatePacket, 't'> | null = null;
   private countdownTimer: ReturnType<typeof setTimeout> | null = null;
@@ -136,11 +138,17 @@ export class MultiplayerMatchController {
         this.socket.emit('room:join', this.pendingJoin);
         this.pendingJoin = null;
       }
-      if (!this.pendingCreate && !this.pendingJoin && this.state.roomCode && this.state.localPlayer) {
+      if (
+        !this.pendingCreate &&
+        !this.pendingJoin &&
+        this.state.roomCode &&
+        this.state.localPlayer
+      ) {
         this.socket.emit('room:join', {
           roomCode: this.state.roomCode,
           nickname: this.state.localPlayer.nickname,
           clientId: this.clientId,
+          characterId: this.state.localPlayer.characterId,
         });
       }
     });
@@ -355,11 +363,12 @@ export class MultiplayerMatchController {
     this.socket.disconnect();
   }
 
-  createRoom(nickname: string) {
+  createRoom(nickname: string, characterId: CharacterId) {
     const safeNickname = nickname.trim() || 'Player 1';
     const payload = {
       nickname: safeNickname,
       clientId: this.clientId,
+      characterId,
     };
     this.pendingJoin = null;
     this.pendingCreate = payload;
@@ -385,13 +394,14 @@ export class MultiplayerMatchController {
     }
   }
 
-  joinRoom(roomCode: string, nickname: string) {
+  joinRoom(roomCode: string, nickname: string, characterId: CharacterId) {
     const safeNickname = nickname.trim() || 'Player';
     const normalizedCode = roomCode.trim().toUpperCase();
     const payload = {
       roomCode: normalizedCode,
       nickname: safeNickname,
       clientId: this.clientId,
+      characterId,
     };
     this.pendingCreate = null;
     this.pendingJoin = payload;

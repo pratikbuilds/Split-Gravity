@@ -3,6 +3,7 @@ import express from 'express';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { Server } from 'socket.io';
+import type { CharacterId } from '../../shared/characters';
 import type {
   ClientToServerEvents,
   MatchResult,
@@ -29,6 +30,15 @@ const START_COUNTDOWN_MS = 2_000;
 const MAX_DELTA_SCROLL_PER_MS = 0.5;
 const LOG_LEVEL = (process.env.LOG_LEVEL || 'info').toLowerCase() as LogLevel;
 const LOG_STATE_EVENTS = process.env.LOG_STATE_EVENTS === '1';
+const SUPPORTED_CHARACTER_IDS: readonly CharacterId[] = [
+  'v3',
+  'pri',
+  'pixel',
+  'raj',
+  'tolymaster',
+  'elon',
+];
+const DEFAULT_CHARACTER_ID: CharacterId = 'v3';
 
 type LogLevel = 'error' | 'warn' | 'info' | 'debug';
 const LOG_PRIORITY: Record<LogLevel, number> = {
@@ -36,6 +46,10 @@ const LOG_PRIORITY: Record<LogLevel, number> = {
   warn: 1,
   info: 2,
   debug: 3,
+};
+
+const isCharacterId = (value: unknown): value is CharacterId => {
+  return typeof value === 'string' && SUPPORTED_CHARACTER_IDS.includes(value as CharacterId);
 };
 
 const logAt = (level: LogLevel, event: string, context?: Record<string, unknown>) => {
@@ -119,6 +133,7 @@ const snapshotRoom = (room: Room): RoomSnapshot => ({
     playerId: player.playerId,
     clientId: player.clientId,
     nickname: player.nickname,
+    characterId: player.characterId,
     alive: player.alive,
     connected: player.connected,
   })),
@@ -131,6 +146,7 @@ const roomSummary = (room: Room) => ({
   players: [...room.players.values()].map((player) => ({
     playerId: player.playerId,
     nickname: player.nickname,
+    characterId: player.characterId,
     alive: player.alive,
     connected: player.connected,
   })),
@@ -308,10 +324,13 @@ const findRoomBySocket = (socketId: string) => {
 io.on('connection', (socket) => {
   logAt('info', 'socket.connected', { socketId: socket.id });
 
-  socket.on('room:create', ({ nickname, clientId }) => {
+  socket.on('room:create', ({ nickname, clientId, characterId }) => {
     if (!isValidClientId(clientId)) {
       logAt('warn', 'room.create.invalid_client_id', { socketId: socket.id, clientId });
-      socket.emit('error', { code: 'INVALID_CLIENT_ID', message: 'Invalid client session. Reopen app.' });
+      socket.emit('error', {
+        code: 'INVALID_CLIENT_ID',
+        message: 'Invalid client session. Reopen app.',
+      });
       return;
     }
 
@@ -330,6 +349,7 @@ io.on('connection', (socket) => {
 
     const roomCode = createRoomCode();
     const playerId = randomUUID();
+    const safeCharacterId = isCharacterId(characterId) ? characterId : DEFAULT_CHARACTER_ID;
     const room: Room = {
       roomCode,
       state: 'ROOM_OPEN',
@@ -344,6 +364,7 @@ io.on('connection', (socket) => {
       playerId,
       clientId,
       nickname: sanitizeNickname(nickname, 'Player 1'),
+      characterId: safeCharacterId,
       alive: true,
       connected: true,
       socketId: socket.id,
@@ -365,15 +386,19 @@ io.on('connection', (socket) => {
       playerId,
       clientId,
       nickname: player.nickname,
+      characterId: player.characterId,
       socketId: socket.id,
     });
     emitRoomState(room);
   });
 
-  socket.on('room:join', ({ roomCode, nickname, clientId }) => {
+  socket.on('room:join', ({ roomCode, nickname, clientId, characterId }) => {
     if (!isValidClientId(clientId)) {
       logAt('warn', 'room.join.invalid_client_id', { socketId: socket.id, clientId });
-      socket.emit('error', { code: 'INVALID_CLIENT_ID', message: 'Invalid client session. Reopen app.' });
+      socket.emit('error', {
+        code: 'INVALID_CLIENT_ID',
+        message: 'Invalid client session. Reopen app.',
+      });
       return;
     }
 
@@ -414,12 +439,14 @@ io.on('connection', (socket) => {
 
     let playerId = room.byClientId.get(clientId);
     let player = playerId ? room.players.get(playerId) : undefined;
+    const safeCharacterId = isCharacterId(characterId) ? characterId : DEFAULT_CHARACTER_ID;
 
     if (player) {
       player.socketId = socket.id;
       player.connected = true;
       player.lastSeenAt = Date.now();
       player.nickname = sanitizeNickname(nickname, player.nickname);
+      player.characterId = safeCharacterId;
       clearPlayerTimers(player);
       if (room.state !== 'RUNNING') {
         room.state = derivePreMatchState(room.players.size, room.readyPlayerIds.size);
@@ -451,6 +478,7 @@ io.on('connection', (socket) => {
       playerId,
       clientId,
       nickname: sanitizeNickname(nickname, 'Player 2'),
+      characterId: safeCharacterId,
       alive: true,
       connected: true,
       socketId: socket.id,
@@ -764,8 +792,14 @@ setInterval(() => {
   const now = Date.now();
   for (const [roomCode, room] of rooms.entries()) {
     if (room.state === 'ENDED') continue;
-    const connectedPlayerCount = [...room.players.values()].filter((player) => player.connected).length;
-    if (now - room.createdAt > ROOM_TTL_MS && room.state !== 'RUNNING' && connectedPlayerCount < 2) {
+    const connectedPlayerCount = [...room.players.values()].filter(
+      (player) => player.connected
+    ).length;
+    if (
+      now - room.createdAt > ROOM_TTL_MS &&
+      room.state !== 'RUNNING' &&
+      connectedPlayerCount < 2
+    ) {
       rooms.delete(roomCode);
       logAt('info', 'room.evicted_stale', { roomCode });
       continue;

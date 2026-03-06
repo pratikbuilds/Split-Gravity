@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import type { MultiplayerViewState } from '../../services/multiplayer/matchController';
+import { getCharacterDefinitionOrDefault } from '../game/characterSpritePresets';
 import { ModeSelect } from './ModeSelect';
 import { RoomCodeInput } from './RoomCodeInput';
 
@@ -36,6 +37,12 @@ export const LobbyScreen = ({
   const canCreate = nickname.trim().length > 0 && state.pendingAction === 'none';
   const canJoin =
     nickname.trim().length > 0 && normalizedCode.length === 5 && state.pendingAction === 'none';
+  const localCharacterName = state.localPlayer
+    ? getCharacterDefinitionOrDefault(state.localPlayer.characterId).displayName
+    : '-';
+  const opponentCharacterName = state.opponent
+    ? getCharacterDefinitionOrDefault(state.opponent.characterId).displayName
+    : 'Waiting...';
 
   return (
     <View className="flex-1 items-center justify-center bg-[#030712] px-6">
@@ -89,10 +96,12 @@ export const LobbyScreen = ({
             {state.roomCode}
           </Text>
           <Text className="text-slate-200">You: {state.localPlayer?.nickname ?? '-'}</Text>
+          <Text className="text-slate-200">Your Character: {localCharacterName}</Text>
           <Text className="text-slate-200">You Ready: {state.localReady ? 'Yes' : 'No'}</Text>
           <Text className="text-slate-200">
             Opponent: {state.opponent?.nickname ?? 'Waiting...'}
           </Text>
+          <Text className="text-slate-200">Opponent Character: {opponentCharacterName}</Text>
           <Text className="mb-6 text-slate-200">
             Opponent Ready: {state.opponentReady ? 'Yes' : 'No'}
           </Text>
