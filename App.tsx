@@ -226,6 +226,10 @@ export default function App() {
       scroll: number;
       alive: boolean;
       score: number;
+      frameIndex: number;
+      velocityY: number;
+      flipLocked: 0 | 1;
+      countdownLocked: 0 | 1;
     }) => {
       multiplayerController.sendState(payload);
     },

@@ -78,17 +78,16 @@ function createCharacterPreset(
   };
 }
 
-// --- Presets (one per asset; override only when needed) ---
-export const DOG_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
-  require('../../assets/game/dog_character.png')
-);
-
 export const PRI_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
   require('../../assets/game/pri.png')
 );
 
 export const TRUMP_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
   require('../../assets/game/v3.png')
+);
+
+export const PIXEL_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
+  require('../../assets/game/pixel.png')
 );
 
 /** Switch active character: TRUMP_CHARACTER_PRESET | DOG_CHARACTER_PRESET | PRI_CHARACTER_PRESET */

@@ -282,6 +282,10 @@ export const GameCanvas = ({
   const opponentPosY = useSharedValue(0);
   const opponentGravity = useSharedValue(1);
   const opponentAlive = useSharedValue(0);
+  const opponentFrameIndex = useSharedValue(0);
+  const opponentVelocityY = useSharedValue(0);
+  const opponentFlipLocked = useSharedValue(0);
+  const opponentCountdownLocked = useSharedValue(0);
 
   const refs = useMemo(
     () => ({
@@ -306,6 +310,10 @@ export const GameCanvas = ({
       opponentPosY,
       opponentGravity,
       opponentAlive,
+      opponentFrameIndex,
+      opponentVelocityY,
+      opponentFlipLocked,
+      opponentCountdownLocked,
     }),
     [
       charX,
@@ -321,8 +329,12 @@ export const GameCanvas = ({
       countdownLocked,
       lastGroundedAtMs,
       opponentAlive,
+      opponentCountdownLocked,
+      opponentFlipLocked,
+      opponentFrameIndex,
       opponentGravity,
       opponentPosY,
+      opponentVelocityY,
       platformRects,
       posY,
       simTimeMs,
@@ -378,6 +390,7 @@ export const GameCanvas = ({
     opponentTransforms,
     opponentRenderTransform,
     characterSprites,
+    opponentSprites,
     backgroundPicture,
     backgroundTransform,
     platformsPicture,
@@ -472,8 +485,23 @@ export const GameCanvas = ({
       opponentPosY.value = groundHeight + snapshot.normalizedY * laneSpan;
       opponentGravity.value = snapshot.gravityDir;
       opponentAlive.value = snapshot.alive ? 1 : 0;
+      opponentFrameIndex.value = snapshot.frameIndex;
+      opponentVelocityY.value = snapshot.velocityY;
+      opponentFlipLocked.value = snapshot.flipLocked;
+      opponentCountdownLocked.value = snapshot.countdownLocked;
     },
-    [charSize, height, opponentAlive, opponentGravity, opponentPosY, opponentSnapshotSignal]
+    [
+      charSize,
+      height,
+      opponentAlive,
+      opponentCountdownLocked,
+      opponentFlipLocked,
+      opponentFrameIndex,
+      opponentGravity,
+      opponentPosY,
+      opponentVelocityY,
+      opponentSnapshotSignal,
+    ]
   );
 
   const opponentX = width * OPPONENT_X_FACTOR;
@@ -520,7 +548,7 @@ export const GameCanvas = ({
             <Group transform={opponentRenderTransform}>
               <Atlas
                 image={characterImage}
-                sprites={characterSprites}
+                sprites={opponentSprites}
                 transforms={opponentTransforms}
               />
             </Group>

@@ -33,6 +33,11 @@ export interface OpponentSnapshot {
   alive: boolean;
   score: number;
   t: number;
+  /** Animation state for opponent sprite */
+  frameIndex: number;
+  velocityY: number;
+  flipLocked: 0 | 1;
+  countdownLocked: 0 | 1;
 }
 
 export type MultiplayerResultReason =

@@ -28,6 +28,10 @@ export type GameCanvasProps = {
     scroll: number;
     alive: boolean;
     score: number;
+    frameIndex: number;
+    velocityY: number;
+    flipLocked: 0 | 1;
+    countdownLocked: 0 | 1;
   }) => void;
   onLocalDeath?: (score: number) => void;
 };
@@ -54,6 +58,10 @@ export interface SimulationRefs {
   opponentPosY: SharedValue<number>;
   opponentGravity: SharedValue<number>;
   opponentAlive: SharedValue<number>;
+  opponentFrameIndex: SharedValue<number>;
+  opponentVelocityY: SharedValue<number>;
+  opponentFlipLocked: SharedValue<number>;
+  opponentCountdownLocked: SharedValue<number>;
 }
 
 export interface ScoreChunkState {

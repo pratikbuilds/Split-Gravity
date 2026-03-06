@@ -214,6 +214,10 @@ export class MultiplayerMatchController {
         alive: state.alive,
         score: state.score,
         t: state.t,
+        frameIndex: state.frameIndex ?? 0,
+        velocityY: state.velocityY ?? 0,
+        flipLocked: state.flipLocked ?? 0,
+        countdownLocked: state.countdownLocked ?? 0,
       };
       this.state = {
         ...this.state,

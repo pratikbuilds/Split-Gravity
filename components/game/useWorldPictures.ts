@@ -110,6 +110,10 @@ interface UseWorldPicturesArgs {
     | 'opponentPosY'
     | 'opponentGravity'
     | 'opponentAlive'
+    | 'opponentFrameIndex'
+    | 'opponentVelocityY'
+    | 'opponentFlipLocked'
+    | 'opponentCountdownLocked'
   >;
 }
 
@@ -186,10 +190,10 @@ export const useWorldPictures = ({
       return;
     }
     const frame = resolveCharacterFrame(
-      refs.countdownLocked.value,
-      refs.flipLockedUntilLanding.value,
-      refs.velocityY.value,
-      refs.frameIndex.value
+      refs.opponentCountdownLocked.value,
+      refs.opponentFlipLocked.value,
+      refs.opponentVelocityY.value,
+      refs.opponentFrameIndex.value
     );
     const hitboxSize = CHAR_SIZE * CHAR_SCALE;
     const targetRenderHeight = hitboxSize * CHARACTER_RENDER_SCALE_MULTIPLIER;
@@ -235,10 +239,10 @@ export const useWorldPictures = ({
     if (gDir !== -1) return [{ translateY: 0 }];
 
     const frame = resolveCharacterFrame(
-      refs.countdownLocked.value,
-      refs.flipLockedUntilLanding.value,
-      refs.velocityY.value,
-      refs.frameIndex.value
+      refs.opponentCountdownLocked.value,
+      refs.opponentFlipLocked.value,
+      refs.opponentVelocityY.value,
+      refs.opponentFrameIndex.value
     );
     const hitboxSize = CHAR_SIZE * CHAR_SCALE;
     const targetRenderHeight = hitboxSize * CHARACTER_RENDER_SCALE_MULTIPLIER;
@@ -257,6 +261,16 @@ export const useWorldPictures = ({
       refs.flipLockedUntilLanding.value,
       refs.velocityY.value,
       refs.frameIndex.value
+    );
+    return [rect(frame.x, frame.y, frame.width, frame.height)];
+  });
+
+  const opponentSprites = useDerivedValue(() => {
+    const frame = resolveCharacterFrame(
+      refs.opponentCountdownLocked.value,
+      refs.opponentFlipLocked.value,
+      refs.opponentVelocityY.value,
+      refs.opponentFrameIndex.value
     );
     return [rect(frame.x, frame.y, frame.width, frame.height)];
   });
@@ -571,6 +585,7 @@ export const useWorldPictures = ({
     opponentTransforms,
     opponentRenderTransform,
     characterSprites,
+    opponentSprites,
     backgroundPicture,
     backgroundTransform,
     platformsPicture,

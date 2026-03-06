@@ -124,6 +124,10 @@ interface UseGameSimulationArgs {
     scroll: number;
     alive: boolean;
     score: number;
+    frameIndex: number;
+    velocityY: number;
+    flipLocked: 0 | 1;
+    countdownLocked: 0 | 1;
   }) => void;
   onLocalDeath?: (score: number) => void;
 }
@@ -329,6 +333,10 @@ export const useGameSimulation = ({
         scroll: refs.totalScroll.value,
         alive: refs.dying.value === 0 && refs.gameOver.value === 0,
         score: Math.floor(refs.totalScroll.value),
+        frameIndex: refs.frameIndex.value,
+        velocityY: refs.velocityY.value,
+        flipLocked: (refs.flipLockedUntilLanding.value === 1 ? 1 : 0) as 0 | 1,
+        countdownLocked: (refs.countdownLocked.value === 1 ? 1 : 0) as 0 | 1,
       });
     }
   });

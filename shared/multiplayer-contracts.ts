@@ -28,6 +28,11 @@ export interface MatchStatePacket {
   scroll: number;
   alive: boolean;
   score: number;
+  /** Animation state for opponent sprite (idle/run/jump/fall) */
+  frameIndex?: number;
+  velocityY?: number;
+  flipLocked?: 0 | 1;
+  countdownLocked?: 0 | 1;
 }
 
 export type MatchResultReason = 'death' | 'disconnect_forfeit' | 'opponent_disconnect_forfeit';

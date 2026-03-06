@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 priority: p2
 issue_id: "003"
 tags: [code-review, consistency, game]
@@ -45,9 +45,13 @@ The opponent sprite animation (idle/run/jump/fall) is driven by **player** refs 
 
 ## Acceptance Criteria
 
-- [ ] Either opponent uses own animation state (refs/derived from snapshot) or intent is documented
+- [x] Either opponent uses own animation state (refs/derived from snapshot) or intent is documented
 
 ## Work Log
+
+### 2025-03-06 - Implementation
+
+**Actions:** Implemented Option 1. Extended MatchStatePacket and OpponentSnapshot with `frameIndex`, `velocityY`, `flipLocked`, `countdownLocked`. Client sends animation state via onLocalState; server relays; GameCanvas writes to opponent SharedValues; useWorldPictures uses opponent refs for opponentTransforms, opponentRenderTransform, opponentSprites.
 
 ### 2025-02-24 - Code review
 
