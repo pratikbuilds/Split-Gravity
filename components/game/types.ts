@@ -8,21 +8,23 @@ import type {
   TerrainTheme,
 } from '../../types/game';
 
+export type GravityDirection = 1 | -1;
+
 export type GameCanvasProps = {
   onExit?: () => void;
   onGameOver?: (result: GameResult) => void;
   onAudioEvent?: (event: GameAudioEvent) => void;
   backgroundIndex?: number;
   terrainTheme?: TerrainTheme;
-  initialGravityDirection?: 1 | -1;
-  opponentInitialGravityDirection?: 1 | -1;
+  initialGravityDirection?: GravityDirection;
+  opponentInitialGravityDirection?: GravityDirection;
   opponentSnapshotValue?: SharedValue<OpponentSnapshot | null>;
   opponentConnectionState?: 'connected' | 'reconnecting' | 'forfeit_pending';
   opponentName?: string;
   onFlipInput?: () => void;
   onLocalState?: (payload: {
     normalizedY: number;
-    gravityDir: 1 | -1;
+    gravityDir: GravityDirection;
     scroll: number;
     alive: boolean;
     score: number;
@@ -34,7 +36,7 @@ export interface SimulationRefs {
   groundY: SharedValue<number>;
   posY: SharedValue<number>;
   velocityY: SharedValue<number>;
-  gravityDirection: SharedValue<number>;
+  gravityDirection: SharedValue<GravityDirection>;
   flipLockedUntilLanding: SharedValue<number>;
   frameIndex: SharedValue<number>;
   elapsedMs: SharedValue<number>;
