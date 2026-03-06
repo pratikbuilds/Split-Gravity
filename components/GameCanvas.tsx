@@ -19,11 +19,12 @@ import {
 import { useGameGestures } from './game/useGameGestures';
 import { useGameSimulation } from './game/useGameSimulation';
 import { useScoreAndChunks } from './game/useScoreAndChunks';
-import type { GameCanvasProps } from './game/types';
+import type { GameCanvasProps, SimulationRefs } from './game/types';
 import { useWorldPictures } from './game/useWorldPictures';
 
 const SCORE_DISPLAY_BUCKET = 10;
 const OPPONENT_SCORE_DISPLAY_BUCKET = 10;
+const DEBUG_OVERLAY_UPDATE_MS = 80;
 type DebugOverlayState = {
   playerX: number;
   playerY: number;
@@ -123,6 +124,124 @@ const OpponentOverlay = React.memo(
   }
 );
 
+type DebugOverlayProps = {
+  refs: Pick<
+    SimulationRefs,
+    | 'charX'
+    | 'posY'
+    | 'velocityY'
+    | 'gravityDirection'
+    | 'opponentPosY'
+    | 'opponentGravity'
+    | 'totalScroll'
+    | 'simTimeMs'
+  >;
+  width: number;
+  height: number;
+  charSize: number;
+  stableGroundY: number;
+  deathLineBottom: number;
+  deathLineTop: number;
+  opponentX: number;
+};
+
+const DebugOverlay = React.memo(
+  ({
+    refs,
+    width,
+    height,
+    charSize,
+    stableGroundY,
+    deathLineBottom,
+    deathLineTop,
+    opponentX,
+  }: DebugOverlayProps) => {
+    const [overlay, setOverlay] = useState<DebugOverlayState | null>(null);
+
+    useAnimatedReaction(
+      () => Math.floor(refs.simTimeMs.value / DEBUG_OVERLAY_UPDATE_MS),
+      () => {
+        'worklet';
+        const playerX = refs.charX.value;
+        const playerY = refs.posY.value;
+        const gravityDown = refs.gravityDirection.value !== -1;
+        const playerFootY = gravityDown ? playerY + charSize : playerY;
+        const playerCenterX = playerX + charSize / 2;
+        const playerCenterY = playerY + charSize / 2;
+        const playerVelocityY = playerCenterY + refs.velocityY.value * 0.06;
+        const playerGravityY = playerCenterY + (gravityDown ? 26 : -26);
+        const opponentY = refs.opponentPosY.value;
+        const opponentFootY = refs.opponentGravity.value === -1 ? opponentY : opponentY + charSize;
+        const flatZoneX = FLAT_ZONE_LENGTH - refs.totalScroll.value;
+        scheduleOnRN(setOverlay, {
+          playerX,
+          playerY,
+          playerFootY,
+          playerCenterX,
+          playerCenterY,
+          playerVelocityY,
+          playerGravityY,
+          opponentY,
+          opponentFootY,
+          flatZoneX,
+        });
+      },
+      [charSize, refs]
+    );
+
+    if (!overlay) return null;
+    return (
+      <>
+        <Line p1={{ x: 0, y: groundHeight }} p2={{ x: width, y: groundHeight }} color="#f59e0b" />
+        <Line p1={{ x: 0, y: stableGroundY }} p2={{ x: width, y: stableGroundY }} color="#f59e0b" />
+        <Line p1={{ x: 0, y: deathLineBottom }} p2={{ x: width, y: deathLineBottom }} color="#ef4444" />
+        <Line p1={{ x: 0, y: deathLineTop }} p2={{ x: width, y: deathLineTop }} color="#ef4444" />
+        <Line p1={{ x: overlay.flatZoneX, y: 0 }} p2={{ x: overlay.flatZoneX, y: height }} color="#22c55e" />
+
+        <Rect
+          x={overlay.playerX}
+          y={overlay.playerY}
+          width={charSize}
+          height={charSize}
+          color="#10b981"
+          style="stroke"
+          strokeWidth={2}
+        />
+        <Line
+          p1={{ x: overlay.playerX + EDGE_CONTACT_MARGIN, y: overlay.playerFootY }}
+          p2={{ x: overlay.playerX + charSize - EDGE_CONTACT_MARGIN, y: overlay.playerFootY }}
+          color="#fde047"
+        />
+        <Line
+          p1={{ x: overlay.playerCenterX, y: overlay.playerCenterY }}
+          p2={{ x: overlay.playerCenterX, y: overlay.playerVelocityY }}
+          color="#38bdf8"
+        />
+        <Line
+          p1={{ x: overlay.playerCenterX, y: overlay.playerCenterY }}
+          p2={{ x: overlay.playerCenterX, y: overlay.playerGravityY }}
+          color="#f472b6"
+        />
+
+        <Rect
+          x={opponentX}
+          y={overlay.opponentY}
+          width={charSize}
+          height={charSize}
+          color="#fb923c"
+          style="stroke"
+          strokeWidth={2}
+        />
+        <Line
+          p1={{ x: opponentX + EDGE_CONTACT_MARGIN, y: overlay.opponentFootY }}
+          p2={{ x: opponentX + charSize - EDGE_CONTACT_MARGIN, y: overlay.opponentFootY }}
+          color="#fdba74"
+        />
+      </>
+    );
+  }
+);
+
 export const GameCanvas = ({
   onExit,
   onGameOver,
@@ -139,7 +258,6 @@ export const GameCanvas = ({
   onLocalDeath,
 }: GameCanvasProps) => {
   const [countdownDigit, setCountdownDigit] = useState<3 | 2 | 1 | null>(3);
-  const [debugOverlay, setDebugOverlay] = useState<DebugOverlayState | null>(null);
   const { width, height } = useWindowDimensions();
 
   const groundY = useSharedValue(0);
@@ -361,45 +479,6 @@ export const GameCanvas = ({
   const deathLineBottom = stableGroundY + charSize * DEATH_MARGIN_FRACTION;
   const deathLineTop = -charSize * DEATH_MARGIN_FRACTION;
 
-  useAnimatedReaction(
-    () => {
-      if (!ENABLE_COLLIDER_DEBUG_UI) {
-        return null;
-      }
-      const playerX = refs.charX.value;
-      const playerY = refs.posY.value;
-      const gravityDown = refs.gravityDirection.value !== -1;
-      const playerFootY = gravityDown ? playerY + charSize : playerY;
-      const playerCenterX = playerX + charSize / 2;
-      const playerCenterY = playerY + charSize / 2;
-      const playerVelocityY = playerCenterY + refs.velocityY.value * 0.06;
-      const playerGravityY = playerCenterY + (gravityDown ? 26 : -26);
-      const opponentY = refs.opponentPosY.value;
-      const opponentFootY = refs.opponentGravity.value === -1 ? opponentY : opponentY + charSize;
-      const flatZoneX = FLAT_ZONE_LENGTH - refs.totalScroll.value;
-      return {
-        playerX,
-        playerY,
-        playerFootY,
-        playerCenterX,
-        playerCenterY,
-        playerVelocityY,
-        playerGravityY,
-        opponentY,
-        opponentFootY,
-        flatZoneX,
-      };
-    },
-    (next) => {
-      'worklet';
-      if (!next) {
-        scheduleOnRN(setDebugOverlay, null);
-        return;
-      }
-      scheduleOnRN(setDebugOverlay, next);
-    }
-  );
-
   return (
     <View style={[styles.container, { width, height }]}>
       <ScoreOverlay scoreValue={scoreValue} />
@@ -445,62 +524,17 @@ export const GameCanvas = ({
               />
             </Group>
           ) : null}
-          {ENABLE_COLLIDER_DEBUG_UI && debugOverlay && (
-            <>
-              <Line p1={{ x: 0, y: groundHeight }} p2={{ x: width, y: groundHeight }} color="#f59e0b" />
-              <Line p1={{ x: 0, y: stableGroundY }} p2={{ x: width, y: stableGroundY }} color="#f59e0b" />
-              <Line
-                p1={{ x: 0, y: deathLineBottom }}
-                p2={{ x: width, y: deathLineBottom }}
-                color="#ef4444"
-              />
-              <Line p1={{ x: 0, y: deathLineTop }} p2={{ x: width, y: deathLineTop }} color="#ef4444" />
-              <Line
-                p1={{ x: debugOverlay.flatZoneX, y: 0 }}
-                p2={{ x: debugOverlay.flatZoneX, y: height }}
-                color="#22c55e"
-              />
-
-              <Rect
-                x={debugOverlay.playerX}
-                y={debugOverlay.playerY}
-                width={charSize}
-                height={charSize}
-                color="#10b981"
-                style="stroke"
-                strokeWidth={2}
-              />
-              <Line
-                p1={{ x: debugOverlay.playerX + EDGE_CONTACT_MARGIN, y: debugOverlay.playerFootY }}
-                p2={{ x: debugOverlay.playerX + charSize - EDGE_CONTACT_MARGIN, y: debugOverlay.playerFootY }}
-                color="#fde047"
-              />
-              <Line
-                p1={{ x: debugOverlay.playerCenterX, y: debugOverlay.playerCenterY }}
-                p2={{ x: debugOverlay.playerCenterX, y: debugOverlay.playerVelocityY }}
-                color="#38bdf8"
-              />
-              <Line
-                p1={{ x: debugOverlay.playerCenterX, y: debugOverlay.playerCenterY }}
-                p2={{ x: debugOverlay.playerCenterX, y: debugOverlay.playerGravityY }}
-                color="#f472b6"
-              />
-
-              <Rect
-                x={opponentX}
-                y={debugOverlay.opponentY}
-                width={charSize}
-                height={charSize}
-                color="#fb923c"
-                style="stroke"
-                strokeWidth={2}
-              />
-              <Line
-                p1={{ x: opponentX + EDGE_CONTACT_MARGIN, y: debugOverlay.opponentFootY }}
-                p2={{ x: opponentX + charSize - EDGE_CONTACT_MARGIN, y: debugOverlay.opponentFootY }}
-                color="#fdba74"
-              />
-            </>
+          {ENABLE_COLLIDER_DEBUG_UI && (
+            <DebugOverlay
+              refs={refs}
+              width={width}
+              height={height}
+              charSize={charSize}
+              stableGroundY={stableGroundY}
+              deathLineBottom={deathLineBottom}
+              deathLineTop={deathLineTop}
+              opponentX={opponentX}
+            />
           )}
         </Canvas>
       </GestureDetector>
