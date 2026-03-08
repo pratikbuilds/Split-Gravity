@@ -6,6 +6,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSharedValue } from 'react-native-reanimated';
+import { AppProviders } from 'components/AppProviders';
 import { CharacterSelectScreen } from 'components/CharacterSelectScreen';
 import { GameCanvas } from 'components/GameCanvas';
 import { GAME_STARTUP_ASSETS } from 'components/game/worldAssetSources';
@@ -46,7 +47,7 @@ function getRandomTerrainTheme(previousTheme?: TerrainTheme): TerrainTheme {
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
-export default function App() {
+function AppContent() {
   const [screen, setScreen] = useState<'home' | 'character_select' | 'lobby' | 'game'>('home');
   const [mode, setMode] = useState<GameMode>('single');
   const [gameKey, setGameKey] = useState(0);
@@ -474,6 +475,14 @@ export default function App() {
         <StatusBar style="auto" />
       </GestureHandlerRootView>
     </SafeAreaProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <AppProviders>
+      <AppContent />
+    </AppProviders>
   );
 }
 
