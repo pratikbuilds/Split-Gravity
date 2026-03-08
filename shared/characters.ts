@@ -1,4 +1,13 @@
-export const CHARACTER_IDS = ['v3', 'pri', 'pixel', 'raj', 'tolymaster', 'elon'] as const;
+export const CHARACTER_IDS = [
+  'v3',
+  'pri',
+  'pixel',
+  'raj',
+  'tolymaster',
+  'elon',
+  'lad',
+  'skieli',
+] as const;
 
 export type CharacterId = (typeof CHARACTER_IDS)[number];
 

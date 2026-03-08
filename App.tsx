@@ -463,11 +463,13 @@ export default function App() {
           </>
         ) : null}
 
-        <View pointerEvents="box-none" style={styles.audioControlWrapper}>
-          <Pressable style={styles.audioToggleButton} onPress={handleToggleMute}>
-            <Text style={styles.audioToggleText}>{isMuted ? 'SOUND OFF' : 'SOUND ON'}</Text>
-          </Pressable>
-        </View>
+        {screen !== 'character_select' ? (
+          <View pointerEvents="box-none" style={styles.audioControlWrapper}>
+            <Pressable style={styles.audioToggleButton} onPress={handleToggleMute}>
+              <Text style={styles.audioToggleText}>{isMuted ? 'SOUND OFF' : 'SOUND ON'}</Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         <StatusBar style="auto" />
       </GestureHandlerRootView>
