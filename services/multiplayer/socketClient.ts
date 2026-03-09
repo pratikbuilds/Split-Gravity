@@ -9,7 +9,8 @@ export type MultiplayerSocket = Socket<ServerToClientEvents, ClientToServerEvent
 export const createMultiplayerSocket = (url: string): MultiplayerSocket => {
   return io(url, {
     autoConnect: false,
-    transports: ['websocket'],
+    // Do not force websocket-only transport here. Mobile networks and edge proxies can reject
+    // the direct websocket path, while Socket.IO polling can still connect and then upgrade.
     reconnection: true,
     reconnectionAttempts: 8,
     timeout: 8000,

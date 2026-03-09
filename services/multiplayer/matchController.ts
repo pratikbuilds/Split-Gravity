@@ -69,6 +69,9 @@ const initialViewState: MultiplayerViewState = {
   queueEntryId: null,
 };
 
+const CREATE_ROOM_DEBUG_TIMEOUT_MS = 10_000;
+const MULTIPLAYER_DEBUG_PREFIX = '[multiplayer]';
+
 export class MultiplayerMatchController {
   private socket: MultiplayerSocket;
   private serverUrl: string;
@@ -82,6 +85,7 @@ export class MultiplayerMatchController {
   private lastStateSentAt = 0;
   private lastSentState: Omit<MatchStatePacket, 't'> | null = null;
   private countdownTimer: ReturnType<typeof setTimeout> | null = null;
+  private createRoomDebugTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionallyDisconnecting = false;
 
   constructor(serverUrl = resolveConfiguredBackendUrl()) {
@@ -104,6 +108,18 @@ export class MultiplayerMatchController {
     this.opponentListeners.forEach((listener) => listener(snapshot));
   }
 
+  private logDebug(event: string, context?: Record<string, unknown>) {
+    const payload = {
+      ts: new Date().toISOString(),
+      serverUrl: this.serverUrl,
+      connected: this.socket.connected,
+      pendingAction: this.state.pendingAction,
+      roomCode: this.state.roomCode,
+      ...context,
+    };
+    console.log(`${MULTIPLAYER_DEBUG_PREFIX} ${event}`, payload);
+  }
+
   private setState(partial: Partial<MultiplayerViewState>) {
     this.state = { ...this.state, ...partial };
     this.emitState();
@@ -119,8 +135,33 @@ export class MultiplayerMatchController {
     this.socket.emit('queue:leave', { queueEntryId: this.state.queueEntryId });
   }
 
+  private clearCreateRoomDebugTimer() {
+    if (!this.createRoomDebugTimer) return;
+    clearTimeout(this.createRoomDebugTimer);
+    this.createRoomDebugTimer = null;
+  }
+
+  private scheduleCreateRoomDebugTimer() {
+    this.clearCreateRoomDebugTimer();
+    this.createRoomDebugTimer = setTimeout(() => {
+      this.createRoomDebugTimer = null;
+      if (this.state.pendingAction !== 'creating_room') return;
+      this.logDebug('create_room.timeout', {
+        clientId: this.clientId,
+        hasPendingCreate: Boolean(this.pendingCreate),
+        connectionState: this.state.connectionState,
+        errorMessage: this.state.errorMessage,
+      });
+      this.setState({
+        errorMessage:
+          'Create room is still waiting on the multiplayer server. Check the console for [multiplayer] logs.',
+      });
+    }, CREATE_ROOM_DEBUG_TIMEOUT_MS);
+  }
+
   private registerSocketHandlers() {
     this.socket.on('connect', () => {
+      this.logDebug('socket.connect', { clientId: this.clientId });
       this.intentionallyDisconnecting = false;
       this.setState({
         connected: true,
@@ -129,10 +170,22 @@ export class MultiplayerMatchController {
         errorMessage: null,
       });
       if (this.pendingCreate) {
+        this.logDebug('socket.emit.room:create', {
+          nickname: this.pendingCreate.nickname,
+          characterId: this.pendingCreate.characterId,
+          roomKind: this.pendingCreate.roomKind ?? 'casual',
+          hasAccessToken: Boolean(this.pendingCreate.accessToken),
+          hasPaymentIntentId: Boolean(this.pendingCreate.paymentIntentId),
+        });
         this.socket.emit('room:create', this.pendingCreate);
         this.pendingCreate = null;
       }
       if (this.pendingJoin) {
+        this.logDebug('socket.emit.room:join', {
+          roomCode: this.pendingJoin.roomCode,
+          nickname: this.pendingJoin.nickname,
+          characterId: this.pendingJoin.characterId,
+        });
         this.socket.emit('room:join', this.pendingJoin);
         this.pendingJoin = null;
       }
@@ -155,8 +208,10 @@ export class MultiplayerMatchController {
       }
     });
 
-    this.socket.on('disconnect', () => {
+    this.socket.on('disconnect', (reason) => {
+      this.logDebug('socket.disconnect', { reason });
       this.clearCountdownTimer();
+      this.clearCreateRoomDebugTimer();
       if (this.intentionallyDisconnecting) {
         this.intentionallyDisconnecting = false;
         this.setState({
@@ -171,6 +226,10 @@ export class MultiplayerMatchController {
     });
 
     this.socket.on('connect_error', (error) => {
+      this.logDebug('socket.connect_error', {
+        message: error.message,
+        name: error.name,
+      });
       this.intentionallyDisconnecting = false;
       const reason = error.message || 'connection failed';
       this.setState({
@@ -182,6 +241,13 @@ export class MultiplayerMatchController {
     });
 
     this.socket.on('room:created', ({ roomCode, player, roomKind }) => {
+      this.clearCreateRoomDebugTimer();
+      this.logDebug('socket.room:created', {
+        roomCode,
+        playerId: player.playerId,
+        nickname: player.nickname,
+        roomKind: roomKind ?? this.state.roomKind,
+      });
       this.setState({
         roomCode,
         localPlayer: player,
@@ -196,6 +262,13 @@ export class MultiplayerMatchController {
     });
 
     this.socket.on('room:state', (room) => {
+      if (this.state.pendingAction === 'creating_room') {
+        this.logDebug('socket.room:state_while_creating', {
+          incomingRoomCode: room.roomCode,
+          playerCount: room.players.length,
+          state: room.state,
+        });
+      }
       this.syncRoomState(room);
     });
 
@@ -283,6 +356,8 @@ export class MultiplayerMatchController {
     });
 
     this.socket.on('error', ({ code, message }) => {
+      this.clearCreateRoomDebugTimer();
+      this.logDebug('socket.error', { code, message });
       if (code === 'PAID_ROOM_CANCELLED' || code === 'PAID_ROOM_EXPIRED') {
         this.clearCountdownTimer();
         this.pendingCreate = null;
@@ -391,12 +466,14 @@ export class MultiplayerMatchController {
 
   connect() {
     if (!this.socket.connected) {
+      this.logDebug('socket.connect_called', { clientId: this.clientId });
       this.socket.connect();
     }
   }
 
   disconnect() {
     this.clearCountdownTimer();
+    this.clearCreateRoomDebugTimer();
     this.pendingCreate = null;
     this.pendingJoin = null;
     this.pendingQueueJoin = null;
@@ -432,6 +509,14 @@ export class MultiplayerMatchController {
     this.pendingJoin = null;
     this.pendingQueueJoin = null;
     this.pendingCreate = payload;
+    this.logDebug('create_room.requested', {
+      nickname: safeNickname,
+      characterId,
+      roomKind: options?.roomKind ?? 'casual',
+      hasAccessToken: Boolean(options?.accessToken),
+      hasPaymentIntentId: Boolean(options?.paymentIntentId),
+    });
+    this.scheduleCreateRoomDebugTimer();
     this.leaveQueueIfNeeded();
     this.leaveRoomIfNeeded();
     this.setState({
@@ -457,6 +542,11 @@ export class MultiplayerMatchController {
     this.emitOpponentSnapshot(null);
     this.connect();
     if (this.socket.connected) {
+      this.logDebug('socket.emit.room:create.immediate', {
+        nickname: payload.nickname,
+        characterId: payload.characterId,
+        roomKind: payload.roomKind ?? 'casual',
+      });
       this.socket.emit('room:create', payload);
       this.pendingCreate = null;
     }
@@ -641,6 +731,7 @@ export class MultiplayerMatchController {
 
   resetLobbyState() {
     this.clearCountdownTimer();
+    this.clearCreateRoomDebugTimer();
     this.pendingCreate = null;
     this.pendingJoin = null;
     this.pendingQueueJoin = null;
