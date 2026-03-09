@@ -9,6 +9,7 @@ import type {
   PaymentIntentResponse,
   PaymentIntentTransactionRequest,
   PaymentIntentTransactionResponse,
+  RefundPaymentIntentResponse,
   SubmitRunResultRequest,
   SubmitRunResultResponse,
   SupportedToken,
@@ -210,6 +211,11 @@ export const backendApi = {
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify(payload),
+    }),
+  refundPaymentIntent: (accessToken: string, paymentIntentId: string) =>
+    fetchJson<RefundPaymentIntentResponse>(`/payments/intents/${paymentIntentId}/refund`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
     }),
   createContestEntry: (accessToken: string, contestId: string, payload: ContestEntryRequest) =>
     fetchJson<ContestEntryResponse>(`/contests/${contestId}/entries`, {

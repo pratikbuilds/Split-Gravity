@@ -204,6 +204,27 @@ export const registerPaymentRoutes = (app: AppLike) => {
     }
   );
 
+  app.post(
+    '/payments/intents/:paymentIntentId/refund',
+    async (request: RequestLike, response: ResponseLike) => {
+      try {
+        response.json(
+          await paymentService.refundPaymentIntent(
+            getBearerToken(request),
+            request.params.paymentIntentId || ''
+          )
+        );
+      } catch (error) {
+        handleError(
+          response,
+          error,
+          'PAYMENT_REFUND_FAILED',
+          isUnauthorizedError(error) ? 401 : 400
+        );
+      }
+    }
+  );
+
   app.post('/contests/:contestId/entries', async (request: RequestLike, response: ResponseLike) => {
     const parsed = createContestEntrySchema.safeParse(request.body);
     if (!parsed.success) {

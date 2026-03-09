@@ -11,6 +11,7 @@ export type HomeScreenRoute =
   | 'leaderboard'
   | 'single_mode_select'
   | 'single_paid_setup'
+  | 'post_payment'
   | 'multi_mode_select'
   | 'multi_paid_setup'
   | 'lobby'
@@ -35,4 +36,15 @@ export interface PaidSetupResult {
   contestEntryId?: string;
   runSessionId?: string;
   transactionSignature: string;
+}
+
+export interface PostPaymentHandoff {
+  kind: PaidFlowSelection['purpose'];
+  eyebrow: string;
+  title: string;
+  subtitle: string;
+  primaryActionLabel: string;
+  primaryHelperText: string;
+  refundLabel: string;
+  refundHelperText: string;
 }
