@@ -20,7 +20,12 @@ export interface GameResult {
   playerScore: number;
 }
 
-export type GameMode = 'single' | 'multi';
+export type GameMode =
+  | 'single_practice'
+  | 'single_paid_contest'
+  | 'multi_casual'
+  | 'multi_paid_private'
+  | 'multi_paid_queue';
 
 export type MatchStatus = 'idle' | 'lobby' | 'countdown' | 'running' | 'result';
 
@@ -50,6 +55,7 @@ export interface MultiplayerResult {
   loserPlayerId: string;
   reason: MultiplayerResultReason;
   endedAt: number;
+  settlementTransactionSignature?: string | null;
 }
 
 export type GameAudioEvent = 'flip' | 'countdown_tick' | 'game_over' | 'land' | 'near_miss';

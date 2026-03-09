@@ -144,9 +144,10 @@ export const useWorldPictures = ({
   const middlePlatformCenterImage = useImage(MIDDLE_PLATFORM_ASSETS.center);
   const middlePlatformRightImage = useImage(MIDDLE_PLATFORM_ASSETS.right);
   const characterPreset = getCharacterPresetOrDefault(characterId);
+  const hasOpponentCharacter = opponentCharacterId != null;
   const opponentPreset = getCharacterPresetOrDefault(opponentCharacterId);
   const characterImage = useImage(characterPreset.imageSource);
-  const opponentImage = useImage(opponentPreset.imageSource);
+  const opponentImage = useImage(hasOpponentCharacter ? opponentPreset.imageSource : null);
 
   const characterTransforms = useRSXformBuffer(1, (val) => {
     'worklet';
@@ -578,7 +579,7 @@ export const useWorldPictures = ({
     backgroundPicture !== null &&
     platformsPicture !== null &&
     characterImage !== null &&
-    opponentImage !== null &&
+    (!hasOpponentCharacter || opponentImage !== null) &&
     width > 0 &&
     height > 0;
 

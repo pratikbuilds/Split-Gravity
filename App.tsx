@@ -4,15 +4,24 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { InteractionManager, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSharedValue } from 'react-native-reanimated';
 import { AppProviders } from 'components/AppProviders';
 import { CharacterSelectScreen } from 'components/CharacterSelectScreen';
 import { GameCanvas } from 'components/GameCanvas';
-import { GAME_STARTUP_ASSETS } from 'components/game/worldAssetSources';
+import { MultiplayerModeSelectScreen } from 'components/MultiplayerModeSelectScreen';
+import { PaidModeSetupScreen } from 'components/PaidModeSetupScreen';
+import {
+  CHARACTER_STARTUP_ASSETS,
+  GAME_ENVIRONMENT_ASSETS,
+  getCharacterAssets,
+} from 'components/game/worldAssetSources';
 import { HomeScreen } from 'components/HomeScreen';
 import { LobbyScreen } from 'components/multiplayer/LobbyScreen';
+import { SingleModeSelectScreen } from 'components/SingleModeSelectScreen';
+import { WalletDebugScreen } from 'components/wallet/WalletDebugScreen';
 import { DEFAULT_CHARACTER_ID, isCharacterId, type CharacterId } from './shared/characters';
+import { backendApi } from './services/backend/api';
 import { getRandomBackgroundIndex } from './utils/backgrounds';
 import type {
   GameAudioEvent,
@@ -22,6 +31,12 @@ import type {
   OpponentSnapshot,
   TerrainTheme,
 } from './types/game';
+import type {
+  HomeScreenRoute,
+  MultiplayerMenuMode,
+  PaidSetupResult,
+  SinglePlayerMenuMode,
+} from './types/payments';
 import {
   configureAudioMode,
   loadSounds,
@@ -48,8 +63,8 @@ function getRandomTerrainTheme(previousTheme?: TerrainTheme): TerrainTheme {
 }
 
 function AppContent() {
-  const [screen, setScreen] = useState<'home' | 'character_select' | 'lobby' | 'game'>('home');
-  const [mode, setMode] = useState<GameMode>('single');
+  const [screen, setScreen] = useState<HomeScreenRoute>('home');
+  const [mode, setMode] = useState<GameMode>('single_practice');
   const [gameKey, setGameKey] = useState(0);
   const [lastResult, setLastResult] = useState<GameResult | null>(null);
   const [gameOver, setGameOver] = useState(false);
@@ -59,6 +74,7 @@ function AppContent() {
   const [isMuted, setIsMuted] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
   const [localMultiplayerDeathScore, setLocalMultiplayerDeathScore] = useState<number | null>(null);
+  const [pendingPaidSession, setPendingPaidSession] = useState<PaidSetupResult | null>(null);
 
   const multiplayerControllerRef = useRef<MultiplayerMatchController | null>(null);
   if (!multiplayerControllerRef.current) {
@@ -72,7 +88,7 @@ function AppContent() {
   const opponentPlayerId = multiplayerState.opponent?.playerId ?? null;
   const hasMultiplayerPair = Boolean(localPlayerId && opponentPlayerId);
   const localStartsBottom =
-    mode !== 'multi' || !localPlayerId || !opponentPlayerId
+    !mode.startsWith('multi_') || !localPlayerId || !opponentPlayerId
       ? true
       : localPlayerId.localeCompare(opponentPlayerId) <= 0;
   const localInitialGravityDirection: 1 | -1 = localStartsBottom ? 1 : -1;
@@ -81,39 +97,112 @@ function AppContent() {
 
   const isMutedRef = useRef(isMuted);
   isMutedRef.current = isMuted;
+  const audioReadyRef = useRef(audioReady);
+  audioReadyRef.current = audioReady;
   const soundsRef = useRef<Awaited<ReturnType<typeof loadSounds>> | null>(null);
-  const startupAssetsPromiseRef = useRef<Promise<void> | null>(null);
+  const audioSetupPromiseRef = useRef<Promise<void> | null>(null);
+  const mountedRef = useRef(true);
+  const assetPreloadPromisesRef = useRef(new Map<number, Promise<void>>());
 
-  const ensureStartupAssetsReady = useCallback(async () => {
-    if (!startupAssetsPromiseRef.current) {
-      startupAssetsPromiseRef.current = Asset.loadAsync(GAME_STARTUP_ASSETS)
+  const preloadAssets = useCallback(async (sources: readonly number[]) => {
+    const uniqueSources = Array.from(new Set(sources));
+    const pendingSources = uniqueSources.filter(
+      (source) => !assetPreloadPromisesRef.current.has(source)
+    );
+
+    if (pendingSources.length > 0) {
+      const loadPromise = Asset.loadAsync(pendingSources)
         .then(() => undefined)
         .catch((error) => {
-          startupAssetsPromiseRef.current = null;
+          pendingSources.forEach((source) => {
+            assetPreloadPromisesRef.current.delete(source);
+          });
           throw error;
         });
+
+      pendingSources.forEach((source) => {
+        assetPreloadPromisesRef.current.set(source, loadPromise);
+      });
     }
 
     try {
-      await startupAssetsPromiseRef.current;
+      await Promise.all(
+        uniqueSources
+          .map((source) => assetPreloadPromisesRef.current.get(source))
+          .filter((promise): promise is Promise<void> => promise != null)
+      );
     } catch (error) {
-      console.warn('Game startup asset preload failed:', error);
+      console.warn('Asset preload failed:', error);
+    }
+  }, []);
+
+  const preloadGameEnvironment = useCallback(() => {
+    void preloadAssets(GAME_ENVIRONMENT_ASSETS);
+  }, [preloadAssets]);
+
+  const preloadCharacters = useCallback(
+    (characterIds: readonly (CharacterId | null | undefined)[]) => {
+      const characterAssets = getCharacterAssets(characterIds);
+      if (characterAssets.length === 0) return;
+      void preloadAssets(characterAssets);
+    },
+    [preloadAssets]
+  );
+
+  const ensureAudioReady = useCallback(async () => {
+    if (soundsRef.current) {
+      if (!audioReadyRef.current && mountedRef.current) {
+        audioReadyRef.current = true;
+        setAudioReady(true);
+      }
+      return;
+    }
+
+    if (!audioSetupPromiseRef.current) {
+      audioSetupPromiseRef.current = (async () => {
+        await configureAudioMode();
+        const sounds = await loadSounds();
+        if (!mountedRef.current) {
+          await unloadSounds(sounds);
+          return;
+        }
+        soundsRef.current = sounds;
+        audioReadyRef.current = true;
+        setAudioReady(true);
+      })().catch((error) => {
+        audioSetupPromiseRef.current = null;
+        audioReadyRef.current = false;
+        throw error;
+      });
+    }
+
+    try {
+      await audioSetupPromiseRef.current;
+    } catch (error) {
+      console.warn('Audio setup failed:', error);
     }
   }, []);
 
   const triggerSound = useCallback(
     (event: GameAudioEvent) => {
       const loadedSounds = soundsRef.current;
-      if (!loadedSounds || !audioReady) return;
+      if (!loadedSounds || !audioReadyRef.current) {
+        void ensureAudioReady();
+        return;
+      }
       const soundKey = mapGameEventToSound(event);
       void playSound(loadedSounds, soundKey, isMutedRef.current);
     },
-    [audioReady]
+    [ensureAudioReady]
   );
 
   useEffect(() => {
-    void ensureStartupAssetsReady();
-  }, [ensureStartupAssetsReady]);
+    preloadGameEnvironment();
+  }, [preloadGameEnvironment]);
+
+  useEffect(() => {
+    preloadCharacters([selectedCharacterId]);
+  }, [preloadCharacters, selectedCharacterId]);
 
   useEffect(() => {
     let active = true;
@@ -163,92 +252,117 @@ function AppContent() {
   }, [multiplayerController, opponentSnapshotValue]);
 
   useEffect(() => {
-    if (mode !== 'multi') return;
+    preloadCharacters([
+      multiplayerState.localPlayer?.characterId,
+      multiplayerState.opponent?.characterId,
+    ]);
+  }, [
+    multiplayerState.localPlayer?.characterId,
+    multiplayerState.opponent?.characterId,
+    preloadCharacters,
+  ]);
+
+  useEffect(() => {
+    if (screen !== 'character_select') return;
+
+    const task = InteractionManager.runAfterInteractions(() => {
+      void preloadAssets(CHARACTER_STARTUP_ASSETS);
+    });
+
+    return () => {
+      task.cancel();
+    };
+  }, [preloadAssets, screen]);
+
+  useEffect(() => {
+    if (!mode.startsWith('multi_')) return;
     if (multiplayerState.matchStatus !== 'running') return;
     if (!hasMultiplayerPair) return;
 
-    let cancelled = false;
-
-    const startMultiplayerGame = async () => {
-      await ensureStartupAssetsReady();
-      if (cancelled) return;
-
-      setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
-      setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
-      setLocalMultiplayerDeathScore(null);
-      setGameOver(false);
-      setLastResult(null);
-      setGameKey((k) => k + 1);
-      setScreen('game');
-    };
-
-    void startMultiplayerGame();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [ensureStartupAssetsReady, hasMultiplayerPair, mode, multiplayerState.matchStatus]);
+    preloadGameEnvironment();
+    preloadCharacters([selectedCharacterId, multiplayerState.opponent?.characterId]);
+    void ensureAudioReady();
+    setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
+    setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
+    setLocalMultiplayerDeathScore(null);
+    setGameOver(false);
+    setLastResult(null);
+    setGameKey((k) => k + 1);
+    setScreen('game');
+  }, [
+    hasMultiplayerPair,
+    mode,
+    multiplayerState.matchStatus,
+    multiplayerState.opponent?.characterId,
+    ensureAudioReady,
+    preloadGameEnvironment,
+    preloadCharacters,
+    selectedCharacterId,
+  ]);
 
   useEffect(() => {
-    let mounted = true;
-    const setupAudio = async () => {
-      try {
-        await configureAudioMode();
-        const sounds = await loadSounds();
-        if (!mounted) {
-          await unloadSounds(sounds);
-          return;
-        }
-        soundsRef.current = sounds;
-        setAudioReady(true);
-      } catch (error) {
-        console.warn('Audio setup failed:', error);
-      }
-    };
+    mountedRef.current = true;
+    void ensureAudioReady();
 
-    setupAudio();
     return () => {
-      mounted = false;
+      mountedRef.current = false;
+      audioSetupPromiseRef.current = null;
+      audioReadyRef.current = false;
       const loadedSounds = soundsRef.current;
       soundsRef.current = null;
       if (loadedSounds) {
         void unloadSounds(loadedSounds);
       }
     };
-  }, []);
+  }, [ensureAudioReady]);
 
   const handleSinglePlayerGameOver = (result: GameResult) => {
-    if (mode !== 'single') return;
+    if (!mode.startsWith('single_')) return;
     setLastResult(result);
     setGameOver(true);
+
+    if (
+      mode === 'single_paid_contest' &&
+      pendingPaidSession?.runSessionId &&
+      pendingPaidSession.accessToken
+    ) {
+      void backendApi
+        .submitRunResult(pendingPaidSession.accessToken, pendingPaidSession.runSessionId, {
+          distance: result.playerScore,
+          finishedAt: new Date().toISOString(),
+        })
+        .catch((error) => {
+          console.warn('Paid run submission failed:', error);
+        });
+    }
   };
 
-  const handleRestart = async () => {
-    await ensureStartupAssetsReady();
+  const handleRestart = () => {
+    preloadGameEnvironment();
+    preloadCharacters([selectedCharacterId]);
+    void ensureAudioReady();
     setGameOver(false);
     setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
     setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
     setGameKey((k) => k + 1);
   };
 
-  const handleSinglePlay = async () => {
-    await ensureStartupAssetsReady();
-    setMode('single');
+  const handleSinglePlay = useCallback(() => {
+    preloadGameEnvironment();
+    preloadCharacters([selectedCharacterId]);
+    void ensureAudioReady();
+    setMode('single_practice');
     setGameOver(false);
     setLastResult(null);
+    setPendingPaidSession(null);
     setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
     setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
     setGameKey((k) => k + 1);
     setScreen('game');
-  };
+  }, [ensureAudioReady, preloadCharacters, preloadGameEnvironment, selectedCharacterId]);
 
   const handleMultiplay = () => {
-    setMode('multi');
-    setGameOver(false);
-    setLastResult(null);
-    setLocalMultiplayerDeathScore(null);
-    multiplayerController.resetLobbyState();
-    setScreen('lobby');
+    setScreen('multi_mode_select');
   };
 
   const handleOpenCharacterSelect = useCallback(() => {
@@ -274,11 +388,12 @@ function AppContent() {
     setGameOver(false);
     setLastResult(null);
     setLocalMultiplayerDeathScore(null);
-    if (mode === 'multi') {
+    if (mode.startsWith('multi_')) {
       multiplayerController.disconnect();
       multiplayerController.resetLobbyState();
-      setMode('single');
+      setMode('single_practice');
     }
+    setPendingPaidSession(null);
     setScreen('home');
   };
 
@@ -288,21 +403,116 @@ function AppContent() {
 
   const handleCreateRoom = useCallback(
     (nickname: string) => {
-      multiplayerController.createRoom(nickname, selectedCharacterId);
+      multiplayerController.createRoom(nickname, selectedCharacterId, {
+        accessToken: pendingPaidSession?.accessToken,
+        roomKind: mode === 'multi_paid_private' ? 'paid_private' : 'casual',
+        tokenId: pendingPaidSession?.selection.token.id,
+        entryFeeTierId: pendingPaidSession?.selection.entryFeeTier.id,
+        paymentIntentId: pendingPaidSession?.paymentIntentId,
+      });
     },
-    [multiplayerController, selectedCharacterId]
+    [mode, multiplayerController, pendingPaidSession, selectedCharacterId]
   );
 
   const handleJoinRoom = useCallback(
     (roomCode: string, nickname: string) => {
-      multiplayerController.joinRoom(roomCode, nickname, selectedCharacterId);
+      multiplayerController.joinRoom(roomCode, nickname, selectedCharacterId, {
+        accessToken: pendingPaidSession?.accessToken,
+        roomKind: mode === 'multi_paid_private' ? 'paid_private' : 'casual',
+        tokenId: pendingPaidSession?.selection.token.id,
+        entryFeeTierId: pendingPaidSession?.selection.entryFeeTier.id,
+        paymentIntentId: pendingPaidSession?.paymentIntentId,
+      });
     },
-    [multiplayerController, selectedCharacterId]
+    [mode, multiplayerController, pendingPaidSession, selectedCharacterId]
   );
 
   const handleReadyRoom = useCallback(() => {
     multiplayerController.readyUp();
   }, [multiplayerController]);
+
+  const handleJoinPaidQueue = useCallback(
+    (nickname: string) => {
+      if (!pendingPaidSession?.accessToken) return;
+      multiplayerController.joinPaidQueue(nickname, selectedCharacterId, {
+        accessToken: pendingPaidSession.accessToken,
+        tokenId: pendingPaidSession.selection.token.id,
+        entryFeeTierId: pendingPaidSession.selection.entryFeeTier.id,
+        paymentIntentId: pendingPaidSession.paymentIntentId,
+      });
+    },
+    [multiplayerController, pendingPaidSession, selectedCharacterId]
+  );
+
+  const handleLeavePaidQueue = useCallback(() => {
+    multiplayerController.leavePaidQueue();
+  }, [multiplayerController]);
+
+  const openSingleModeSelect = useCallback(() => {
+    setScreen('single_mode_select');
+  }, []);
+
+  const handleSingleModeSelect = useCallback(
+    (nextMode: SinglePlayerMenuMode) => {
+      if (nextMode === 'practice') {
+        handleSinglePlay();
+        return;
+      }
+
+      setScreen('single_paid_setup');
+    },
+    [handleSinglePlay]
+  );
+
+  const handleMultiplayerModeSelect = useCallback(
+    (nextMode: MultiplayerMenuMode) => {
+      if (nextMode === 'casual_room') {
+        setMode('multi_casual');
+        setPendingPaidSession(null);
+        setGameOver(false);
+        setLastResult(null);
+        setLocalMultiplayerDeathScore(null);
+        multiplayerController.resetLobbyState();
+        setScreen('lobby');
+        return;
+      }
+
+      setMode(nextMode === 'paid_private_room' ? 'multi_paid_private' : 'multi_paid_queue');
+      setScreen('multi_paid_setup');
+    },
+    [multiplayerController]
+  );
+
+  const handlePaidSetupComplete = useCallback(
+    (result: PaidSetupResult) => {
+      setPendingPaidSession(result);
+      setGameOver(false);
+      setLastResult(null);
+      setLocalMultiplayerDeathScore(null);
+
+      if (result.selection.purpose === 'single_paid_contest') {
+        preloadGameEnvironment();
+        preloadCharacters([selectedCharacterId]);
+        void ensureAudioReady();
+        setMode('single_paid_contest');
+        setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
+        setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
+        setGameKey((k) => k + 1);
+        setScreen('game');
+        return;
+      }
+
+      multiplayerController.resetLobbyState();
+      setScreen('lobby');
+    },
+    [
+      ensureAudioReady,
+      multiplayerController,
+      preloadCharacters,
+      preloadGameEnvironment,
+      selectedCharacterId,
+    ]
+  );
 
   const handleFlipInput = useCallback(() => {
     multiplayerController.sendInput('flip');
@@ -343,9 +553,10 @@ function AppContent() {
         {screen === 'home' ? (
           <HomeScreen
             selectedCharacterId={selectedCharacterId}
-            onSinglePlay={handleSinglePlay}
+            onSinglePlay={openSingleModeSelect}
             onMultiplay={handleMultiplay}
             onOpenCharacterSelect={handleOpenCharacterSelect}
+            onOpenWalletDebug={__DEV__ ? () => setScreen('wallet_debug') : undefined}
           />
         ) : null}
 
@@ -357,20 +568,53 @@ function AppContent() {
           />
         ) : null}
 
+        {screen === 'wallet_debug' ? <WalletDebugScreen onBack={handleReturnHome} /> : null}
+
+        {screen === 'single_mode_select' ? (
+          <SingleModeSelectScreen onBack={handleReturnHome} onSelect={handleSingleModeSelect} />
+        ) : null}
+
+        {screen === 'multi_mode_select' ? (
+          <MultiplayerModeSelectScreen
+            onBack={handleReturnHome}
+            onSelect={handleMultiplayerModeSelect}
+          />
+        ) : null}
+
+        {screen === 'single_paid_setup' ? (
+          <PaidModeSetupScreen
+            purpose="single_paid_contest"
+            onBack={() => setScreen('single_mode_select')}
+            onComplete={handlePaidSetupComplete}
+          />
+        ) : null}
+
+        {screen === 'multi_paid_setup' ? (
+          <PaidModeSetupScreen
+            purpose={mode === 'multi_paid_queue' ? 'multi_paid_queue' : 'multi_paid_private'}
+            onBack={() => setScreen('multi_mode_select')}
+            onComplete={handlePaidSetupComplete}
+          />
+        ) : null}
+
         {screen === 'lobby' ? (
           <LobbyScreen
             state={multiplayerState}
             onBack={handleExitToHome}
             onCreateRoom={handleCreateRoom}
             onJoinRoom={handleJoinRoom}
+            onJoinQueue={handleJoinPaidQueue}
+            onLeaveQueue={handleLeavePaidQueue}
             onReady={handleReadyRoom}
+            mode={mode}
+            paidSession={pendingPaidSession}
           />
         ) : null}
 
         {screen === 'game' ? (
           <>
             <GameCanvas
-              key={gameKey}
+              restartKey={gameKey}
               onExit={handleExitToHome}
               onGameOver={handleSinglePlayerGameOver}
               onAudioEvent={triggerSound}
@@ -379,20 +623,22 @@ function AppContent() {
               initialGravityDirection={localInitialGravityDirection}
               characterId={selectedCharacterId}
               opponentCharacterId={
-                mode === 'multi' ? multiplayerState.opponent?.characterId : undefined
+                mode.startsWith('multi_') ? multiplayerState.opponent?.characterId : undefined
               }
               opponentInitialGravityDirection={opponentInitialGravityDirection}
-              opponentSnapshotValue={mode === 'multi' ? opponentSnapshotValue : undefined}
-              opponentName={mode === 'multi' ? multiplayerState.opponent?.nickname : undefined}
-              opponentConnectionState={
-                mode === 'multi' ? multiplayerState.connectionState : 'connected'
+              opponentSnapshotValue={mode.startsWith('multi_') ? opponentSnapshotValue : undefined}
+              opponentName={
+                mode.startsWith('multi_') ? multiplayerState.opponent?.nickname : undefined
               }
-              onFlipInput={mode === 'multi' ? handleFlipInput : undefined}
-              onLocalState={mode === 'multi' ? handleLocalState : undefined}
-              onLocalDeath={mode === 'multi' ? handleLocalDeath : undefined}
+              opponentConnectionState={
+                mode.startsWith('multi_') ? multiplayerState.connectionState : 'connected'
+              }
+              onFlipInput={mode.startsWith('multi_') ? handleFlipInput : undefined}
+              onLocalState={mode.startsWith('multi_') ? handleLocalState : undefined}
+              onLocalDeath={mode.startsWith('multi_') ? handleLocalDeath : undefined}
             />
 
-            {mode === 'single' && gameOver && (
+            {mode.startsWith('single_') && gameOver && (
               <View style={styles.gameOverOverlay}>
                 <View style={styles.gameOverBackdrop} />
                 <View style={styles.gameOverModal}>
@@ -411,7 +657,7 @@ function AppContent() {
               </View>
             )}
 
-            {mode === 'multi' && (
+            {mode.startsWith('multi_') && (
               <>
                 {localMultiplayerDeathScore !== null && !multiplayerResult && (
                   <View style={styles.statusChipWrap}>
@@ -442,6 +688,11 @@ function AppContent() {
                       <Text style={styles.gameOverSubtitle}>
                         Reason: {multiplayerResult.reason}
                       </Text>
+                      {multiplayerResult.settlementTransactionSignature ? (
+                        <Text style={styles.gameOverSubtitle}>
+                          Tx: {multiplayerResult.settlementTransactionSignature.slice(0, 12)}...
+                        </Text>
+                      ) : null}
                       <View style={styles.gameOverButtons}>
                         <Pressable
                           style={styles.restartButton}

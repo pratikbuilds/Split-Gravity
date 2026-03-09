@@ -5,7 +5,7 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import type { CharacterId } from '../shared/characters';
 import { CharacterSpritePreview } from './character/CharacterSpritePreview';
 import { getCharacterDefinitionOrDefault } from './game/characterSpritePresets';
-import { WalletProofCard } from './wallet/WalletProofCard';
+import { WalletStatusChip } from './wallet/WalletStatusChip';
 
 const SECTION_GAP = 28;
 const HERO_SIZE = 270;
@@ -16,6 +16,7 @@ type HomeScreenProps = {
   onSinglePlay: () => void;
   onMultiplay: () => void;
   onOpenCharacterSelect: () => void;
+  onOpenWalletDebug?: () => void;
 };
 
 export const HomeScreen = ({
@@ -23,6 +24,7 @@ export const HomeScreen = ({
   onSinglePlay,
   onMultiplay,
   onOpenCharacterSelect,
+  onOpenWalletDebug,
 }: HomeScreenProps) => {
   const insets = useSafeAreaInsets();
 
@@ -46,13 +48,19 @@ export const HomeScreen = ({
         <View className="w-full max-w-sm px-6">
           {/* Header: starts below SOUND button; title centered */}
           <View className="w-full items-center self-center">
-            <Text className="text-center text-5xl font-black tracking-[4px] text-white">
-              Runner
-            </Text>
+            <Pressable onLongPress={onOpenWalletDebug} disabled={!onOpenWalletDebug}>
+              <Text className="text-center text-5xl font-black tracking-[4px] text-white">
+                Runner
+              </Text>
+            </Pressable>
             <Text className="mt-3 max-w-xs text-center text-sm leading-5 text-slate-300">
-              Pick your runner, keep the profile saved, and take that same character into solo or
-              multiplayer matches.
+              Pick your runner, keep the profile saved, and launch straight into solo or
+              multiplayer. Wallet steps only appear when you choose a paid mode.
             </Text>
+          </View>
+
+          <View className="mt-5">
+            <WalletStatusChip />
           </View>
 
           {/* Hero: sprite + name */}
@@ -72,8 +80,6 @@ export const HomeScreen = ({
               <Text className="text-center text-base font-bold text-white">Characters</Text>
             </Pressable>
           </View>
-
-          <WalletProofCard />
 
           <View
             style={{

@@ -19,14 +19,15 @@ export type CharacterDefinition = {
   spritePreset: CharacterSpritePreset;
 };
 
-// --- Shared sheet layout: design space 1024×571; all character assets are 2K: 2752×1536 ---
-export const CHARACTER_SHEET_WIDTH = 2752;
-export const CHARACTER_SHEET_HEIGHT = 1536;
+// Shared sheet layout: design space 1024×571; gameplay sheets are downscaled to 1376×768
+// to reduce decode time and memory pressure on mobile.
+export const CHARACTER_SHEET_WIDTH = 1376;
+export const CHARACTER_SHEET_HEIGHT = 768;
 
 const BASE_SHEET_WIDTH = 1024;
 const BASE_SHEET_HEIGHT = 571;
-const X_SCALE_2K = CHARACTER_SHEET_WIDTH / BASE_SHEET_WIDTH;
-const Y_SCALE_2K = CHARACTER_SHEET_HEIGHT / BASE_SHEET_HEIGHT;
+const X_SCALE = CHARACTER_SHEET_WIDTH / BASE_SHEET_WIDTH;
+const Y_SCALE = CHARACTER_SHEET_HEIGHT / BASE_SHEET_HEIGHT;
 
 const scaleFrame = (frame: SpriteFrame, xScale: number, yScale: number): SpriteFrame => ({
   x: Math.round(frame.x * xScale),
@@ -35,7 +36,7 @@ const scaleFrame = (frame: SpriteFrame, xScale: number, yScale: number): SpriteF
   height: Math.round(frame.height * yScale),
 });
 
-/** Base frame rects in 1024×571 design space; scaled to 2752×1536 for all character sheets. */
+/** Base frame rects in 1024×571 design space; scaled to the normalized gameplay sheet size. */
 const BASE_ACTIONS: Record<CharacterAction, readonly SpriteFrame[]> = {
   run: [
     { x: 32, y: 12, width: 107, height: 160 },
@@ -67,59 +68,57 @@ const SHARED_FRAME_SLOWDOWNS: Record<CharacterAction, number> = {
   fall: 2,
 };
 
-/** 2K sheet: frames scaled to CHARACTER_SHEET_WIDTH × CHARACTER_SHEET_HEIGHT (2752×1536). */
-const ACTIONS_2K: Record<CharacterAction, readonly SpriteFrame[]> = {
-  run: BASE_ACTIONS.run.map((f) => scaleFrame(f, X_SCALE_2K, Y_SCALE_2K)),
-  jump: BASE_ACTIONS.jump.map((f) => scaleFrame(f, X_SCALE_2K, Y_SCALE_2K)),
-  fall: BASE_ACTIONS.fall.map((f) => scaleFrame(f, X_SCALE_2K, Y_SCALE_2K)),
-  idle: BASE_ACTIONS.idle.map((f) => scaleFrame(f, X_SCALE_2K, Y_SCALE_2K)),
+const ACTIONS: Record<CharacterAction, readonly SpriteFrame[]> = {
+  run: BASE_ACTIONS.run.map((f) => scaleFrame(f, X_SCALE, Y_SCALE)),
+  jump: BASE_ACTIONS.jump.map((f) => scaleFrame(f, X_SCALE, Y_SCALE)),
+  fall: BASE_ACTIONS.fall.map((f) => scaleFrame(f, X_SCALE, Y_SCALE)),
+  idle: BASE_ACTIONS.idle.map((f) => scaleFrame(f, X_SCALE, Y_SCALE)),
 };
-const FEET_TRIM_2K_PX = Math.round(8 * Y_SCALE_2K);
+const FEET_TRIM_PX = Math.round(8 * Y_SCALE);
 
 type PresetOverrides = Partial<
   Pick<CharacterSpritePreset, 'renderScaleMultiplier' | 'feetTrimPx' | 'frameSlowdowns' | 'actions'>
 >;
 
-/** Creates a preset for 2K character assets (2752×1536). All character sprites must use this size. */
-function createCharacterPreset2K(
+function createCharacterPreset(
   imageSource: number,
   overrides: PresetOverrides = {}
 ): CharacterSpritePreset {
   return {
     imageSource,
     renderScaleMultiplier: 1.25,
-    feetTrimPx: FEET_TRIM_2K_PX,
+    feetTrimPx: FEET_TRIM_PX,
     frameSlowdowns: SHARED_FRAME_SLOWDOWNS,
-    actions: ACTIONS_2K,
+    actions: ACTIONS,
     ...overrides,
   };
 }
 
-// export const PIXEL_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset2K(
+// export const PIXEL_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
 //   require('../../assets/game/pixel.png')
 // );
 
-// export const RAJ_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset2K(
+// export const RAJ_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
 //   require('../../assets/game/raj.png')
 // );
 
-export const TRUMP_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset2K(
+export const TRUMP_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
   require('../../assets/game/trump.png')
 );
 
-export const TOLYMASTER_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset2K(
+export const TOLYMASTER_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
   require('../../assets/game/tolytoday.png')
 );
 
-export const SKELI_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset2K(
+export const SKELI_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
   require('../../assets/game/skieli.png')
 );
 
-export const ELON_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset2K(
+export const ELON_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
   require('../../assets/game/elon.png')
 );
 
-export const LAD_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset2K(
+export const LAD_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
   require('../../assets/game/laddy.png')
 );
 

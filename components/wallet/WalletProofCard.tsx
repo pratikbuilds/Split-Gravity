@@ -3,6 +3,7 @@ import { Platform, Pressable, Text, View } from 'react-native';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { useMobileWallet } from '@wallet-ui/react-native-web3js';
 
+import { getWalletAddress, getWalletPublicKey } from '../../utils/wallet/account';
 import { formatWalletError, isUserRejectedWalletError } from '../../utils/wallet/errors';
 import {
   buildProofTransaction,
@@ -25,7 +26,7 @@ function WalletProofCardComponent() {
   const [feedback, setFeedback] = useState<FeedbackState>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
 
-  const walletAddress = account?.publicKey.toBase58() ?? null;
+  const walletAddress = getWalletAddress(account);
   const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
   const isSupportedRuntime = Platform.OS === 'android' && !isExpoGo;
 
@@ -59,8 +60,9 @@ function WalletProofCardComponent() {
 
     try {
       const nextAccount = await connect();
+      const nextAddress = getWalletAddress(nextAccount);
       setFeedback({
-        lines: [`Connected: ${nextAccount.publicKey.toBase58()}`],
+        lines: [`Connected: ${nextAddress ?? 'unknown wallet'}`],
         tone: 'success',
       });
     } catch (error) {
@@ -102,9 +104,14 @@ function WalletProofCardComponent() {
     });
 
     try {
+      const publicKey = getWalletPublicKey(account);
+      if (!publicKey) {
+        throw new Error('Connected wallet account is missing a valid public key.');
+      }
+
       let proof = await buildProofTransaction({
         connection,
-        publicKey: account.publicKey,
+        publicKey,
       });
       let signedTransaction;
 
@@ -118,7 +125,7 @@ function WalletProofCardComponent() {
         proof = await buildProofTransaction({
           connection,
           lamports: FALLBACK_PROOF_LAMPORTS,
-          publicKey: account.publicKey,
+          publicKey,
         });
         signedTransaction = await signTransaction(proof.transaction);
       }

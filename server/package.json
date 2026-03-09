@@ -4,16 +4,29 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
-    "test": "node --import tsx --test src/tests/**/*.test.ts"
+    "dev": "node --import tsx src/index.ts",
+    "start": "node --import tsx src/index.ts",
+    "test": "node --import tsx --test src/tests/**/*.test.ts",
+    "typecheck": "tsc --noEmit --pretty false",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push"
   },
   "dependencies": {
+    "@solana/web3.js": "^1.98.4",
     "cors": "^2.8.5",
+    "drizzle-orm": "^0.43.1",
     "express": "^4.21.2",
-    "socket.io": "^4.8.1"
+    "pg": "^8.16.3",
+    "pg-boss": "^10.3.3",
+    "socket.io": "^4.8.1",
+    "tweetnacl": "^1.0.3",
+    "zod": "^4.1.5"
   },
   "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/pg": "^8.15.5",
+    "drizzle-kit": "^0.31.4",
+    "pg-mem": "^3.0.14",
     "tsx": "^4.20.3",
     "typescript": "^5.9.2"
   }
