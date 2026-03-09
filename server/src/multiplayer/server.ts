@@ -482,6 +482,17 @@ export const startServer = async () => {
         entryFeeTierId,
         paymentIntentId,
       }) => {
+        logAt('info', 'room.create.received', {
+          socketId: socket.id,
+          clientId,
+          nickname,
+          characterId,
+          roomKind: roomKind ?? 'casual',
+          hasAccessToken: Boolean(accessToken),
+          hasTokenId: Boolean(tokenId),
+          hasEntryFeeTierId: Boolean(entryFeeTierId),
+          hasPaymentIntentId: Boolean(paymentIntentId),
+        });
         if (!isValidClientId(clientId)) {
           logAt('warn', 'room.create.invalid_client_id', { socketId: socket.id, clientId });
           socket.emit('error', {
@@ -494,6 +505,12 @@ export const startServer = async () => {
         const linked = findRoomBySocket(socket.id);
         if (linked) {
           if (linked.room.state === 'RUNNING') {
+            logAt('warn', 'room.create.failed_match_in_progress', {
+              socketId: socket.id,
+              clientId,
+              roomCode: linked.room.roomCode,
+              playerId: linked.player.playerId,
+            });
             socket.emit('error', {
               code: 'MATCH_IN_PROGRESS',
               message: 'Finish the current match before creating a new room.',
@@ -511,6 +528,13 @@ export const startServer = async () => {
 
         if (safeRoomKind === 'paid_private') {
           if (!tokenId || !entryFeeTierId || !paymentIntentId) {
+            logAt('warn', 'room.create.failed_paid_terms_missing', {
+              socketId: socket.id,
+              clientId,
+              hasTokenId: Boolean(tokenId),
+              hasEntryFeeTierId: Boolean(entryFeeTierId),
+              hasPaymentIntentId: Boolean(paymentIntentId),
+            });
             socket.emit('error', {
               code: 'PAID_ROOM_INVALID',
               message: 'Paid room requires token, entry fee tier, and funding.',
@@ -529,6 +553,12 @@ export const startServer = async () => {
               }
             ).player.id;
           } catch (error) {
+            logAt('warn', 'room.create.failed_paid_funding_invalid', {
+              socketId: socket.id,
+              clientId,
+              paymentIntentId,
+              message: error instanceof Error ? error.message : 'unknown',
+            });
             socket.emit('error', {
               code: 'PAID_ROOM_FUNDING_INVALID',
               message: error instanceof Error ? error.message : 'Unable to validate funding.',
