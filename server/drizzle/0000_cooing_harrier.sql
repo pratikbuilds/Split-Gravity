@@ -2,7 +2,7 @@ CREATE TYPE "public"."chain_transaction_kind" AS ENUM('deposit', 'withdrawal', '
 CREATE TYPE "public"."chain_transaction_status" AS ENUM('pending', 'submitted', 'confirmed', 'failed');--> statement-breakpoint
 CREATE TYPE "public"."ledger_transaction_type" AS ENUM('entry_fee', 'payout', 'refund', 'withdrawal');--> statement-breakpoint
 CREATE TYPE "public"."payment_intent_purpose" AS ENUM('single_paid_contest', 'multi_paid_private', 'multi_paid_queue');--> statement-breakpoint
-CREATE TYPE "public"."payment_intent_status" AS ENUM('pending', 'confirmed', 'expired');--> statement-breakpoint
+CREATE TYPE "public"."payment_intent_status" AS ENUM('pending', 'confirmed', 'refunded', 'settled', 'expired');--> statement-breakpoint
 CREATE TYPE "public"."transaction_direction" AS ENUM('credit', 'debit');--> statement-breakpoint
 CREATE TYPE "public"."wager_status" AS ENUM('awaiting_opponent', 'awaiting_funding', 'funded', 'running', 'settled', 'cancelled', 'refund_pending', 'refunded');--> statement-breakpoint
 CREATE TYPE "public"."withdrawal_status" AS ENUM('pending', 'submitted', 'confirmed', 'failed');--> statement-breakpoint
@@ -214,4 +214,7 @@ ALTER TABLE "withdrawal_requests" ADD CONSTRAINT "withdrawal_requests_player_id_
 ALTER TABLE "withdrawal_requests" ADD CONSTRAINT "withdrawal_requests_token_id_supported_tokens_id_fk" FOREIGN KEY ("token_id") REFERENCES "public"."supported_tokens"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "daily_contests_bucket_idx" ON "daily_contests" USING btree ("token_id","entry_fee_tier_id","starts_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "entry_fee_tiers_token_tier_idx" ON "entry_fee_tiers" USING btree ("token_id","label");--> statement-breakpoint
-CREATE UNIQUE INDEX "players_wallet_address_idx" ON "players" USING btree ("wallet_address");
+CREATE UNIQUE INDEX "players_wallet_address_idx" ON "players" USING btree ("wallet_address");--> statement-breakpoint
+CREATE UNIQUE INDEX "contest_entries_payment_intent_idx" ON "contest_entries" USING btree ("payment_intent_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "payment_intents_transaction_signature_idx" ON "payment_intents" USING btree ("transaction_signature");--> statement-breakpoint
+CREATE UNIQUE INDEX "wallet_sessions_token_idx" ON "wallet_sessions" USING btree ("token");

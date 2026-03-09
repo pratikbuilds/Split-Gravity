@@ -98,7 +98,23 @@
           "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "contest_entries_payment_intent_idx": {
+          "name": "contest_entries_payment_intent_idx",
+          "columns": [
+            {
+              "expression": "payment_intent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "chain_transactions_player_id_players_id_fk": {
           "name": "chain_transactions_player_id_players_id_fk",
@@ -170,7 +186,23 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "payment_intents_transaction_signature_idx": {
+          "name": "payment_intents_transaction_signature_idx",
+          "columns": [
+            {
+              "expression": "transaction_signature",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "contest_entries_player_id_players_id_fk": {
           "name": "contest_entries_player_id_players_id_fk",
@@ -449,7 +481,23 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "wallet_sessions_token_idx": {
+          "name": "wallet_sessions_token_idx",
+          "columns": [
+            {
+              "expression": "token",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "leaderboard_scores_contest_id_daily_contests_id_fk": {
           "name": "leaderboard_scores_contest_id_daily_contests_id_fk",
@@ -1517,6 +1565,8 @@
       "values": [
         "pending",
         "confirmed",
+        "refunded",
+        "settled",
         "expired"
       ]
     },

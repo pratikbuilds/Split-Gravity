@@ -38,14 +38,19 @@ const parseJson = async <T>(response: Response): Promise<T> => {
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const baseUrl = resolveConfiguredBackendUrl();
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...init,
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch (error) {
+    throw new ApiError(error instanceof Error ? error.message : 'Network request failed', 0);
+  }
 
   if (!response.ok) {
     const errorBody =

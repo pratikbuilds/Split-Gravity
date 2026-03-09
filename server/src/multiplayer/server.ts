@@ -54,6 +54,7 @@ export const startServer = async () => {
   const rooms = new Map<string, Room>();
   const queueBuckets = new Map<string, QueueEntry[]>();
   const queueEntryIdBySocketId = new Map<string, string>();
+  const socketIndex = new Map<string, { roomCode: string; playerId: string }>();
 
   const getRoomPaymentIntentIds = (room: Room) => [...room.paymentIntentIdsByPlayerId.values()];
 
@@ -107,6 +108,9 @@ export const startServer = async () => {
       state: room.state,
     });
     room.cleanupTimer = setTimeout(() => {
+      for (const player of room.players.values()) {
+        socketIndex.delete(player.socketId);
+      }
       rooms.delete(room.roomCode);
       logAt('info', 'room.cleanup.executed', { roomCode: room.roomCode });
     }, delayMs);
@@ -135,14 +139,35 @@ export const startServer = async () => {
     return removeQueueEntryById(queueEntryId);
   };
 
+  const getQueueEntryBySocketId = (socketId: string) => {
+    const queueEntryId = queueEntryIdBySocketId.get(socketId);
+    if (!queueEntryId) return null;
+
+    for (const entries of queueBuckets.values()) {
+      const entry = entries.find((candidate) => candidate.id === queueEntryId);
+      if (entry) {
+        return entry;
+      }
+    }
+
+    return null;
+  };
+
+  const insertQueueEntry = (entry: QueueEntry) => {
+    const bucketKey = queueBucketKey(entry.tokenId, entry.entryFeeTierId);
+    queueBuckets.set(bucketKey, [...(queueBuckets.get(bucketKey) ?? []), entry]);
+    queueEntryIdBySocketId.set(entry.socketId, entry.id);
+  };
+
   const refundPaidRoom = async (room: Room, description: string) => {
     if (
       (room.roomKind !== 'paid_private' && room.roomKind !== 'paid_queue') ||
       room.settlementStatus === 'refunded'
     ) {
-      return;
+      return true;
     }
 
+    let allRefundsSucceeded = true;
     for (const player of room.players.values()) {
       if (!player.walletPlayerId || !player.paymentIntentId) continue;
       try {
@@ -152,6 +177,7 @@ export const startServer = async () => {
           description
         );
       } catch (error) {
+        allRefundsSucceeded = false;
         logAt('warn', 'payment.refund.failed', {
           roomCode: room.roomCode,
           playerId: player.playerId,
@@ -160,7 +186,11 @@ export const startServer = async () => {
       }
     }
 
-    room.settlementStatus = 'refunded';
+    if (allRefundsSucceeded) {
+      room.settlementStatus = 'refunded';
+    }
+
+    return allRefundsSucceeded;
   };
 
   const closePaidRoomBeforeStart = async (room: Room, code: string, message: string) => {
@@ -169,6 +199,7 @@ export const startServer = async () => {
     for (const player of room.players.values()) {
       io.sockets.sockets.get(player.socketId)?.leave(room.roomCode);
       room.byClientId.delete(player.clientId);
+      socketIndex.delete(player.socketId);
       clearPlayerTimers(player);
     }
     clearRoomCleanup(room);
@@ -185,10 +216,12 @@ export const startServer = async () => {
     if (!player) return;
 
     clearPlayerTimers(player);
+    socketIndex.delete(player.socketId);
     room.players.delete(playerId);
     room.byClientId.delete(player.clientId);
     room.readyPlayerIds.delete(playerId);
     room.fundedPlayerIds.delete(playerId);
+    room.paymentIntentIdsByPlayerId.delete(playerId);
 
     if (room.players.size === 0) {
       clearRoomCleanup(room);
@@ -351,14 +384,94 @@ export const startServer = async () => {
   };
 
   const findRoomBySocket = (socketId: string) => {
-    for (const room of rooms.values()) {
-      for (const player of room.players.values()) {
-        if (player.socketId === socketId) {
-          return { room, player };
-        }
-      }
+    const indexed = socketIndex.get(socketId);
+    if (!indexed) return null;
+    const room = rooms.get(indexed.roomCode);
+    const player = room?.players.get(indexed.playerId);
+    if (!room || !player) {
+      socketIndex.delete(socketId);
+      return null;
     }
-    return null;
+    return { room, player };
+  };
+
+  const beginReconnectWindow = (room: Room, player: ServerPlayer) => {
+    if (
+      room.state !== 'RUNNING' ||
+      player.connected ||
+      player.disconnectTimer ||
+      player.reconnectInterval
+    ) {
+      return;
+    }
+
+    const opponent = getRoomOpponent(room, player.playerId);
+    if (!opponent) {
+      return;
+    }
+
+    emitRoomState(room);
+
+    let remainingSeconds = Math.ceil(RECONNECT_GRACE_MS / 1000);
+    io.to(room.roomCode).emit('session:reconnectWindow', {
+      playerId: player.playerId,
+      secondsRemaining: remainingSeconds,
+    });
+    logAt('warn', 'session.reconnect_window.started', {
+      roomCode: room.roomCode,
+      playerId: player.playerId,
+      secondsRemaining: remainingSeconds,
+    });
+
+    const interval = setInterval(() => {
+      remainingSeconds -= 1;
+      if (remainingSeconds <= 0) {
+        clearInterval(interval);
+        player.reconnectInterval = undefined;
+        return;
+      }
+      io.to(room.roomCode).emit('session:reconnectWindow', {
+        playerId: player.playerId,
+        secondsRemaining: remainingSeconds,
+      });
+      if (LOG_STATE_EVENTS) {
+        logAt('debug', 'session.reconnect_window.tick', {
+          roomCode: room.roomCode,
+          playerId: player.playerId,
+          secondsRemaining: remainingSeconds,
+        });
+      }
+    }, 1000);
+    player.reconnectInterval = interval;
+
+    player.disconnectTimer = setTimeout(() => {
+      clearInterval(interval);
+      player.reconnectInterval = undefined;
+      player.disconnectTimer = undefined;
+      if (player.connected || room.state !== 'RUNNING') {
+        logAt('info', 'session.reconnect_window.cancelled', {
+          roomCode: room.roomCode,
+          playerId: player.playerId,
+          connected: player.connected,
+          state: room.state,
+        });
+        return;
+      }
+      runInBackground(
+        endMatch(room, opponent.playerId, player.playerId, 'disconnect_forfeit'),
+        'match.end.background_failed',
+        {
+          roomCode: room.roomCode,
+          winnerPlayerId: opponent.playerId,
+          loserPlayerId: player.playerId,
+          reason: 'disconnect_forfeit',
+        }
+      );
+      logAt('warn', 'match.disconnect_forfeit', {
+        roomCode: room.roomCode,
+        loserPlayerId: player.playerId,
+      });
+    }, RECONNECT_GRACE_MS);
   };
 
   io.on('connection', (socket) => {
@@ -468,11 +581,13 @@ export const startServer = async () => {
         }
         rooms.set(roomCode, room);
         clearRoomCleanup(room);
+        socketIndex.set(socket.id, { roomCode, playerId });
 
         socket.join(roomCode);
         socket.emit('room:created', {
           roomCode,
           player,
+          roomKind: room.roomKind,
         });
         logAt('info', 'room.created', {
           roomCode,
@@ -566,6 +681,9 @@ export const startServer = async () => {
         let player = playerId ? room.players.get(playerId) : undefined;
 
         if (player) {
+          if (player.socketId !== socket.id) {
+            socketIndex.delete(player.socketId);
+          }
           player.socketId = socket.id;
           player.connected = true;
           player.lastSeenAt = Date.now();
@@ -583,6 +701,7 @@ export const startServer = async () => {
           if (room.state !== 'RUNNING') {
             room.state = derivePreMatchState(room.players.size, room.readyPlayerIds.size);
           }
+          socketIndex.set(socket.id, { roomCode: normalizedCode, playerId: player.playerId });
           socket.join(normalizedCode);
           logAt('info', 'room.rejoined', {
             roomCode: normalizedCode,
@@ -659,6 +778,7 @@ export const startServer = async () => {
           room.paymentIntentIdsByPlayerId.set(playerId, paymentIntentId);
         }
 
+        socketIndex.set(socket.id, { roomCode: normalizedCode, playerId });
         socket.join(normalizedCode);
         logAt('info', 'room.joined', {
           roomCode: normalizedCode,
@@ -674,7 +794,7 @@ export const startServer = async () => {
 
     socket.on(
       'queue:join',
-      ({
+      async ({
         nickname,
         clientId,
         characterId,
@@ -699,8 +819,7 @@ export const startServer = async () => {
           });
           return;
         }
-
-        removeQueueEntryBySocketId(socket.id);
+        const existingQueueEntry = getQueueEntryBySocketId(socket.id);
 
         let walletPlayerId: string;
         try {
@@ -719,6 +838,48 @@ export const startServer = async () => {
             message: error instanceof Error ? error.message : 'Unable to validate queue funding.',
           });
           return;
+        }
+
+        if (existingQueueEntry) {
+          const isSameEntry =
+            existingQueueEntry.paymentIntentId === paymentIntentId &&
+            existingQueueEntry.tokenId === tokenId &&
+            existingQueueEntry.entryFeeTierId === entryFeeTierId;
+          if (isSameEntry) {
+            emitQueueStateToSocket(socket.id, {
+              status: 'queued',
+              queueEntryId: existingQueueEntry.id,
+              tokenId: existingQueueEntry.tokenId,
+              entryFeeTierId: existingQueueEntry.entryFeeTierId,
+              message: 'Waiting for another funded player in this entry fee bucket.',
+            });
+            return;
+          }
+
+          try {
+            await paymentService.refundRealtimePaymentIntent(
+              existingQueueEntry.walletPlayerId,
+              existingQueueEntry.paymentIntentId,
+              'Replaced paid queue entry before a new queue join'
+            );
+            removeQueueEntryById(existingQueueEntry.id);
+          } catch (error) {
+            emitQueueStateToSocket(socket.id, {
+              status: 'queued',
+              queueEntryId: existingQueueEntry.id,
+              tokenId: existingQueueEntry.tokenId,
+              entryFeeTierId: existingQueueEntry.entryFeeTierId,
+              message: 'Existing queue entry is still active because the refund failed.',
+            });
+            socket.emit('error', {
+              code: 'QUEUE_REPLACE_FAILED',
+              message:
+                error instanceof Error
+                  ? error.message
+                  : 'Unable to replace the existing paid queue entry.',
+            });
+            return;
+          }
         }
 
         const entry: QueueEntry = {
@@ -744,8 +905,7 @@ export const startServer = async () => {
         }
 
         if (!opponent) {
-          queueBuckets.set(bucketKey, [...(queueBuckets.get(bucketKey) ?? []), entry]);
-          queueEntryIdBySocketId.set(socket.id, entry.id);
+          insertQueueEntry(entry);
           emitQueueStateToSocket(socket.id, {
             status: 'queued',
             queueEntryId: entry.id,
@@ -774,8 +934,7 @@ export const startServer = async () => {
               });
             });
 
-          queueBuckets.set(bucketKey, [...(queueBuckets.get(bucketKey) ?? []), entry]);
-          queueEntryIdBySocketId.set(socket.id, entry.id);
+          insertQueueEntry(entry);
           emitQueueStateToSocket(socket.id, {
             status: 'queued',
             queueEntryId: entry.id,
@@ -829,10 +988,12 @@ export const startServer = async () => {
         clearRoomCleanup(room);
 
         roomPlayers.forEach((player) => {
+          socketIndex.set(player.socketId, { roomCode, playerId: player.playerId });
           io.sockets.sockets.get(player.socketId)?.join(roomCode);
           io.to(player.socketId).emit('room:created', {
             roomCode,
             player,
+            roomKind: room.roomKind,
           });
           emitQueueStateToSocket(player.socketId, {
             status: 'matched',
@@ -854,31 +1015,52 @@ export const startServer = async () => {
     );
 
     socket.on('queue:leave', ({ queueEntryId }) => {
+      const authoritativeQueueEntryId = queueEntryIdBySocketId.get(socket.id);
       const removed =
-        (queueEntryId ? removeQueueEntryById(queueEntryId) : null) ??
-        removeQueueEntryBySocketId(socket.id);
+        (queueEntryId && queueEntryId === authoritativeQueueEntryId
+          ? removeQueueEntryById(queueEntryId)
+          : null) ?? removeQueueEntryBySocketId(socket.id);
       if (!removed) {
         emitQueueStateToSocket(socket.id, { status: 'idle' });
         return;
       }
 
-      void paymentService
-        .refundRealtimePaymentIntent(
-          removed.walletPlayerId,
-          removed.paymentIntentId,
-          'Paid queue entry cancelled before match start'
-        )
-        .catch((error) => {
-          logAt('warn', 'queue.leave.refund.failed', {
-            queueEntryId: removed.id,
-            message: error instanceof Error ? error.message : 'unknown',
-          });
-        });
-
-      emitQueueStateToSocket(socket.id, {
-        status: 'idle',
-        message: 'Queue entry cancelled and refunded.',
-      });
+      runInBackground(
+        (async () => {
+          try {
+            await paymentService.refundRealtimePaymentIntent(
+              removed.walletPlayerId,
+              removed.paymentIntentId,
+              'Paid queue entry cancelled before match start'
+            );
+            emitQueueStateToSocket(socket.id, {
+              status: 'idle',
+              message: 'Queue entry cancelled and refunded.',
+            });
+          } catch (error) {
+            insertQueueEntry(removed);
+            emitQueueStateToSocket(socket.id, {
+              status: 'queued',
+              queueEntryId: removed.id,
+              tokenId: removed.tokenId,
+              entryFeeTierId: removed.entryFeeTierId,
+              message: 'Queue leave failed. Your paid queue entry is still active.',
+            });
+            socket.emit('error', {
+              code: 'QUEUE_LEAVE_FAILED',
+              message:
+                error instanceof Error
+                  ? error.message
+                  : 'Unable to cancel the paid queue entry.',
+            });
+          }
+        })(),
+        'queue.leave.refund_failed',
+        {
+          queueEntryId: removed.id,
+          socketId: socket.id,
+        }
+      );
     });
 
     socket.on('room:leave', ({ roomCode }) => {
@@ -1171,75 +1353,7 @@ export const startServer = async () => {
         return;
       }
 
-      emitRoomState(room);
-
-      const opponent = [...room.players.values()].find(
-        (candidate) => candidate.playerId !== player.playerId
-      );
-      if (!opponent) {
-        return;
-      }
-
-      let remainingSeconds = Math.ceil(RECONNECT_GRACE_MS / 1000);
-      io.to(room.roomCode).emit('session:reconnectWindow', {
-        playerId: player.playerId,
-        secondsRemaining: remainingSeconds,
-      });
-      logAt('warn', 'session.reconnect_window.started', {
-        roomCode: room.roomCode,
-        playerId: player.playerId,
-        secondsRemaining: remainingSeconds,
-      });
-
-      const interval = setInterval(() => {
-        remainingSeconds -= 1;
-        if (remainingSeconds <= 0) {
-          clearInterval(interval);
-          player.reconnectInterval = undefined;
-          return;
-        }
-        io.to(room.roomCode).emit('session:reconnectWindow', {
-          playerId: player.playerId,
-          secondsRemaining: remainingSeconds,
-        });
-        if (LOG_STATE_EVENTS) {
-          logAt('debug', 'session.reconnect_window.tick', {
-            roomCode: room.roomCode,
-            playerId: player.playerId,
-            secondsRemaining: remainingSeconds,
-          });
-        }
-      }, 1000);
-      player.reconnectInterval = interval;
-
-      player.disconnectTimer = setTimeout(() => {
-        clearInterval(interval);
-        player.reconnectInterval = undefined;
-        player.disconnectTimer = undefined;
-        if (player.connected || room.state !== 'RUNNING') {
-          logAt('info', 'session.reconnect_window.cancelled', {
-            roomCode: room.roomCode,
-            playerId: player.playerId,
-            connected: player.connected,
-            state: room.state,
-          });
-          return;
-        }
-        runInBackground(
-          endMatch(room, opponent.playerId, player.playerId, 'disconnect_forfeit'),
-          'match.end.background_failed',
-          {
-            roomCode: room.roomCode,
-            winnerPlayerId: opponent.playerId,
-            loserPlayerId: player.playerId,
-            reason: 'disconnect_forfeit',
-          }
-        );
-        logAt('warn', 'match.disconnect_forfeit', {
-          roomCode: room.roomCode,
-          loserPlayerId: player.playerId,
-        });
-      }, RECONNECT_GRACE_MS);
+      beginReconnectWindow(room, player);
     });
   });
 
@@ -1271,6 +1385,9 @@ export const startServer = async () => {
           );
           continue;
         }
+        for (const player of room.players.values()) {
+          socketIndex.delete(player.socketId);
+        }
         rooms.delete(roomCode);
         logAt('info', 'room.evicted_stale', { roomCode });
         continue;
@@ -1287,6 +1404,13 @@ export const startServer = async () => {
             idleMs: now - player.lastSeenAt,
           });
         }
+      }
+
+      if (markedInactive && room.state === 'RUNNING') {
+        for (const player of room.players.values()) {
+          beginReconnectWindow(room, player);
+        }
+        continue;
       }
 
       if (markedInactive && room.state !== 'RUNNING') {

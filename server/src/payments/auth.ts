@@ -1,7 +1,15 @@
 import { randomBytes } from 'node:crypto';
 import nacl from 'tweetnacl';
+import { createSignInMessageText, parseSignInMessageText } from '@solana/wallet-standard-util';
 import { PublicKey } from '@solana/web3.js';
+import * as walletAuthShared from '../../../shared/walletAuth';
 import { NONCE_TTL_MS, SESSION_TTL_MS } from './config';
+
+const sharedWalletAuth =
+  'default' in walletAuthShared
+    ? (walletAuthShared.default as typeof import('../../../shared/walletAuth'))
+    : walletAuthShared;
+const { createWalletSignInMessageFields } = sharedWalletAuth;
 
 export interface WalletNonceRecord {
   nonce: string;
@@ -58,7 +66,25 @@ export const verifyWalletSignature = ({
     throw new Error('Wallet signature verification failed.');
   }
 
-  if (!messageText.includes(nonce)) {
-    throw new Error('Signed message nonce mismatch.');
+  let parsedMessage: ReturnType<typeof parseSignInMessageText>;
+  try {
+    parsedMessage = parseSignInMessageText(messageText);
+  } catch {
+    throw new Error('Signed message format mismatch.');
+  }
+  if (!parsedMessage?.issuedAt) {
+    throw new Error('Signed message format mismatch.');
+  }
+
+  const expectedMessage = createSignInMessageText(
+    createWalletSignInMessageFields({
+      address: walletAddress,
+      nonce,
+      issuedAt: parsedMessage.issuedAt,
+    })
+  );
+
+  if (messageText !== expectedMessage) {
+    throw new Error('Signed message payload mismatch.');
   }
 };

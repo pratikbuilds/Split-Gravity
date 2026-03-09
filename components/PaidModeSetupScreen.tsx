@@ -38,6 +38,17 @@ const PURPOSE_COPY: Record<PaymentIntentPurpose, { title: string; description: s
 
 const shortenAddress = (address: string) => `${address.slice(0, 4)}...${address.slice(-4)}`;
 
+type PaymentProgress = {
+  selectionKey: string;
+  accessToken?: string;
+  paymentIntentId?: string;
+  transactionSignature?: string;
+  contestEntryId?: string;
+  runSessionId?: string;
+};
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSetupScreenProps) => {
   const { account, connect, disconnect, signAndSendTransaction, signIn } = useMobileWallet();
   const [tokens, setTokens] = useState<SupportedToken[]>([]);
@@ -48,6 +59,7 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [paymentProgress, setPaymentProgress] = useState<PaymentProgress | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,6 +118,7 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
     () => selectedToken?.entryFeeTiers.find((tier) => tier.id === selectedTierId) ?? null,
     [selectedTierId, selectedToken]
   );
+  const selectionKey = `${purpose}:${selectedTokenId ?? 'none'}:${selectedTierId ?? 'none'}:${contestId ?? 'none'}`;
 
   useEffect(() => {
     if (!selectedToken) return;
@@ -128,11 +141,42 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
     setContestId(match?.id ?? null);
   }, [contests, purpose, selectedTier, selectedToken]);
 
+  useEffect(() => {
+    setPaymentProgress((current) => (current?.selectionKey === selectionKey ? current : null));
+  }, [selectionKey]);
+
   const walletAddress = getWalletAddress(account);
   const copy = PURPOSE_COPY[purpose];
+  const contestUnavailable = purpose === 'single_paid_contest' && !contestId;
+
+  const runWithBackoff = async <T,>(operation: () => Promise<T>) => {
+    const delays = [0, 500, 1500];
+    let lastError: unknown;
+    for (const delay of delays) {
+      if (delay > 0) {
+        await wait(delay);
+      }
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError;
+  };
 
   const handlePrimaryAction = async () => {
     setError(null);
+
+    if (!selectedToken || !selectedTier) {
+      setError('Select a token and entry fee before continuing.');
+      return;
+    }
+
+    if (contestUnavailable) {
+      setError('No active contest is available for that token and entry fee.');
+      return;
+    }
 
     try {
       setSubmitting(true);
@@ -143,64 +187,99 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
       if (!wallet || !publicKey) {
         throw new Error('Connected wallet account is missing a valid public key.');
       }
-      const { nonce } = await backendApi.createWalletNonce();
-      const signInPayload = createWalletSignInPayload(nonce);
-      const signInResult = await signIn(signInPayload);
-      const auth = await backendApi.verifyWallet({
-        walletAddress: wallet,
-        nonce,
-        signature: fromUint8Array(signInResult.signature),
-        signedMessage: fromUint8Array(signInResult.signedMessage),
-      });
+      const currentProgress =
+        paymentProgress?.selectionKey === selectionKey ? paymentProgress : null;
 
-      if (!selectedToken || !selectedTier) {
-        throw new Error('Select a token and entry fee before continuing.');
-      }
-
-      if (purpose === 'single_paid_contest' && !contestId) {
-        throw new Error('No active contest is available for that token and entry fee.');
-      }
-
-      const paymentIntent = await backendApi.createPaymentIntent(auth.accessToken, {
-        tokenId: selectedToken.id,
-        entryFeeTierId: selectedTier.id,
-        purpose,
-        contestId: contestId ?? undefined,
-      });
-
-      const built = await backendApi.buildPaymentIntentTransaction(
-        auth.accessToken,
-        paymentIntent.paymentIntentId,
-        {
+      let accessToken = currentProgress?.accessToken;
+      if (!accessToken) {
+        const { nonce } = await backendApi.createWalletNonce();
+        const signInPayload = createWalletSignInPayload(nonce);
+        const signInResult = await signIn(signInPayload);
+        const auth = await backendApi.verifyWallet({
           walletAddress: wallet,
-        }
-      );
-      const transaction = Transaction.from(
-        Buffer.from(built.serializedTransactionBase64, 'base64')
-      );
-      const txSignature = await signAndSendTransaction(transaction, built.minContextSlot);
-      const transactionSignature = Array.isArray(txSignature) ? txSignature[0] : txSignature;
+          nonce,
+          signature: fromUint8Array(signInResult.signature),
+          signedMessage: fromUint8Array(signInResult.signedMessage),
+        });
+        accessToken = auth.accessToken;
+        setPaymentProgress({
+          selectionKey,
+          accessToken,
+        });
+      }
 
-      await backendApi.confirmPaymentIntent(auth.accessToken, paymentIntent.paymentIntentId, {
-        transactionSignature,
-        walletAddress: wallet,
-      });
+      let paymentIntentId = currentProgress?.paymentIntentId;
+      if (!paymentIntentId) {
+        const paymentIntent = await backendApi.createPaymentIntent(accessToken, {
+          tokenId: selectedToken.id,
+          entryFeeTierId: selectedTier.id,
+          purpose,
+          contestId: contestId ?? undefined,
+        });
+        paymentIntentId = paymentIntent.paymentIntentId;
+        setPaymentProgress((existing) => ({
+          ...(existing ?? { selectionKey }),
+          selectionKey,
+          accessToken,
+          paymentIntentId,
+        }));
+      }
+
+      let transactionSignature = currentProgress?.transactionSignature;
+      if (!transactionSignature) {
+        const built = await backendApi.buildPaymentIntentTransaction(accessToken, paymentIntentId, {
+          walletAddress: wallet,
+        });
+        const transaction = Transaction.from(
+          Buffer.from(built.serializedTransactionBase64, 'base64')
+        );
+        const txSignature = await signAndSendTransaction(transaction, built.minContextSlot);
+        transactionSignature = Array.isArray(txSignature) ? txSignature[0] : txSignature;
+        setPaymentProgress((existing) => ({
+          ...(existing ?? { selectionKey }),
+          selectionKey,
+          accessToken,
+          paymentIntentId,
+          transactionSignature,
+        }));
+      }
+
+      await runWithBackoff(() =>
+        backendApi.confirmPaymentIntent(accessToken!, paymentIntentId!, {
+          transactionSignature: transactionSignature!,
+          walletAddress: wallet,
+        })
+      );
 
       let contestEntryId: string | undefined;
       let runSessionId: string | undefined;
       if (purpose === 'single_paid_contest' && contestId) {
-        const contestEntry = await backendApi.createContestEntry(auth.accessToken, contestId, {
-          paymentIntentId: paymentIntent.paymentIntentId,
-          contestId,
-        });
-        contestEntryId = contestEntry.contestEntryId;
-        runSessionId = contestEntry.runSessionId;
+        contestEntryId = currentProgress?.contestEntryId;
+        runSessionId = currentProgress?.runSessionId;
+        if (!contestEntryId || !runSessionId) {
+          const contestEntry = await runWithBackoff(() =>
+            backendApi.createContestEntry(accessToken!, contestId, {
+              paymentIntentId: paymentIntentId!,
+            })
+          );
+          contestEntryId = contestEntry.contestEntryId;
+          runSessionId = contestEntry.runSessionId;
+          setPaymentProgress((existing) => ({
+            ...(existing ?? { selectionKey }),
+            selectionKey,
+            accessToken,
+            paymentIntentId,
+            transactionSignature,
+            contestEntryId,
+            runSessionId,
+          }));
+        }
       }
 
       onComplete({
-        accessToken: auth.accessToken,
-        paymentIntentId: paymentIntent.paymentIntentId,
-        transactionSignature,
+        accessToken,
+        paymentIntentId: paymentIntentId!,
+        transactionSignature: transactionSignature!,
         contestEntryId,
         runSessionId,
         selection: {
@@ -320,13 +399,15 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
 
         <Pressable
           onPress={() => void handlePrimaryAction()}
-          disabled={loading || submitting || !selectedToken || !selectedTier}
+          disabled={loading || submitting || !selectedToken || !selectedTier || contestUnavailable}
           className={`mt-8 rounded-full px-6 py-4 active:opacity-80 ${
-            loading || submitting || !selectedToken || !selectedTier ? 'bg-slate-700' : 'bg-white'
+            loading || submitting || !selectedToken || !selectedTier || contestUnavailable
+              ? 'bg-slate-700'
+              : 'bg-white'
           }`}>
           <Text
             className={`text-center text-lg font-black ${
-              loading || submitting || !selectedToken || !selectedTier
+              loading || submitting || !selectedToken || !selectedTier || contestUnavailable
                 ? 'text-slate-300'
                 : 'text-black'
             }`}>

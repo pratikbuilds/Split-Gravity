@@ -106,7 +106,6 @@ export interface ConfirmPaymentIntentResponse {
 
 export interface ContestEntryRequest {
   paymentIntentId: string;
-  contestId: string;
   nickname?: string;
 }
 

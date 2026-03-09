@@ -144,7 +144,11 @@ export interface ClientToServerEvents {
 }
 
 export interface ServerToClientEvents {
-  'room:created': (payload: { roomCode: string; player: PlayerSession }) => void;
+  'room:created': (payload: {
+    roomCode: string;
+    player: PlayerSession;
+    roomKind?: MatchRoomKind;
+  }) => void;
   'room:state': (payload: RoomSnapshot) => void;
   'match:start': (payload: {
     roomCode: string;

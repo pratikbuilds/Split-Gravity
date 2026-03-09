@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import nacl from 'tweetnacl';
+import { createSignInMessageText } from '@solana/wallet-standard-util';
 import {
   Connection,
   Keypair,
@@ -15,6 +16,13 @@ import {
 } from '@solana/web3.js';
 import { PaymentService } from '../payments/service';
 import { PaymentStore } from '../payments/store';
+import * as walletAuthShared from '../../../shared/walletAuth';
+
+const sharedWalletAuth =
+  'default' in walletAuthShared
+    ? (walletAuthShared.default as typeof import('../../../shared/walletAuth'))
+    : walletAuthShared;
+const { createWalletSignInMessageFields } = sharedWalletAuth;
 
 const runDevnetTest = process.env.RUN_DEVNET_PAYMENT_E2E === '1' ? test : test.skip;
 const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -51,7 +59,15 @@ const fundAddress = async ({
 
 const createSignedWalletSession = async (service: PaymentService, keypair: Keypair) => {
   const nonce = await service.issueNonce();
-  const message = new TextEncoder().encode(`Runner sign-in nonce: ${nonce.nonce}`);
+  const message = new TextEncoder().encode(
+    createSignInMessageText(
+      createWalletSignInMessageFields({
+        address: keypair.publicKey.toBase58(),
+        nonce: nonce.nonce,
+        issuedAt: nonce.issuedAt,
+      })
+    )
+  );
   const signature = nacl.sign.detached(message, keypair.secretKey);
 
   return service.verifyWallet({
@@ -258,7 +274,6 @@ runDevnetTest('devnet payment creation signing confirmation and withdrawal flow'
   });
   const entry = await service.createContestEntry(winnerSession.accessToken, contest.id, {
     paymentIntentId: contestIntent.paymentIntentId,
-    contestId: contest.id,
   });
   await service.submitRun(winnerSession.accessToken, entry.runSessionId, {
     distance: 250,

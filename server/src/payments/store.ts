@@ -105,7 +105,7 @@ type ContestSettlementRecord = {
   payouts: LeaderboardEntry[];
 };
 
-export type PaymentStoreSnapshot = {
+export type PaymentStoreSnapshot = Record<string, unknown> & {
   players: PlayerRecord[];
   paymentIntents: PaymentIntentRecord[];
   contestEntries: ContestEntryRecord[];
@@ -466,6 +466,9 @@ export class PaymentStore {
   ): ContestEntryResponse {
     const existing = this.contestEntriesByPaymentIntentId.get(paymentIntentId);
     if (existing) {
+      if (existing.contestId !== contestId) {
+        throw new Error('Payment intent already used for a different contest.');
+      }
       const runSession = this.runSessions.get(existing.runSessionId);
       return {
         contestEntryId: existing.id,
@@ -475,9 +478,16 @@ export class PaymentStore {
       };
     }
 
+    const contest = this.getDailyContests().find((entry) => entry.id === contestId);
+    if (!contest) {
+      throw new Error('Contest not found.');
+    }
+
     this.validateConfirmedPaymentIntent(playerId, paymentIntentId, {
       purpose: 'single_paid_contest',
       contestId,
+      tokenId: contest.tokenId,
+      entryFeeTierId: contest.entryFeeTierId,
     });
 
     const contestEntryId = randomUUID();
@@ -594,9 +604,17 @@ export class PaymentStore {
       });
     });
 
+    const settledAt = new Date().toISOString();
+    for (const entry of contestEntries) {
+      const intent = this.paymentIntents.get(entry.paymentIntentId);
+      if (!intent || !intent.confirmedAt) continue;
+      intent.status = 'settled';
+      intent.settledAt = settledAt;
+    }
+
     this.settledContests.set(contestId, {
       contestId,
-      settledAt: new Date().toISOString(),
+      settledAt,
       payouts,
     });
     this.leaderboardByContest.set(contestId, payouts);
@@ -621,35 +639,34 @@ export class PaymentStore {
       if (!intent) {
         throw new Error('Payment intent not found.');
       }
-      if (intent.status === 'settled') {
-        return intent;
-      }
       if (intent.status === 'refunded') {
         throw new Error('Refunded payment intent cannot be settled.');
       }
-      if (intent.status !== 'confirmed' || !intent.confirmedAt) {
+      if (intent.status !== 'settled' && (intent.status !== 'confirmed' || !intent.confirmedAt)) {
         throw new Error('Only confirmed payment intents can be settled.');
       }
       return intent;
     });
 
-    const allSettled = intents.every((intent) => intent.status === 'settled');
-    if (allSettled) {
+    const alreadySettled = intents.filter((intent) => intent.status === 'settled');
+    const toSettle = intents.filter((intent) => intent.status !== 'settled');
+
+    if (toSettle.length === 0) {
       return {
         winnerPlayerId,
-        ledgerTransactionId: intents[0]?.settlementLedgerTransactionId ?? '',
-        transactionSignature: intents[0]?.settlementTransactionSignature ?? null,
-        amount: intents
+        ledgerTransactionId: alreadySettled[0]?.settlementLedgerTransactionId ?? '',
+        transactionSignature: alreadySettled[0]?.settlementTransactionSignature ?? null,
+        amount: alreadySettled
           .reduce((sum, intent) => sum + BigInt(intent.amountBaseUnits), 0n)
           .toString(),
       };
     }
 
-    const totalAmount = intents.reduce((sum, intent) => sum + BigInt(intent.amountBaseUnits), 0n);
+    const totalAmount = toSettle.reduce((sum, intent) => sum + BigInt(intent.amountBaseUnits), 0n);
     const createdAt = new Date().toISOString();
     const ledgerTransactionId = randomUUID();
 
-    for (const intent of intents) {
+    for (const intent of toSettle) {
       intent.status = 'settled';
       intent.settledAt = createdAt;
       intent.settlementLedgerTransactionId = ledgerTransactionId;
@@ -659,7 +676,7 @@ export class PaymentStore {
     if (options?.externalTransferSignature) {
       const chainTransaction = this.createChainTransaction({
         playerId: winnerPlayerId,
-        tokenId: intents[0]!.tokenId,
+        tokenId: toSettle[0]!.tokenId,
         kind: 'payout',
         referenceId: ledgerTransactionId,
         status: 'confirmed',
@@ -667,13 +684,13 @@ export class PaymentStore {
         destinationAddress: this.playersById.get(winnerPlayerId)?.walletAddress,
         confirmedAt: createdAt,
       });
-      for (const intent of intents) {
+      for (const intent of toSettle) {
         intent.settlementChainTransactionId = chainTransaction.id;
       }
     } else {
       this.pushLedgerTransaction(winnerPlayerId, {
         id: ledgerTransactionId,
-        tokenId: intents[0]!.tokenId,
+        tokenId: toSettle[0]!.tokenId,
         amount: totalAmount.toString(),
         direction: 'credit',
         type: 'payout',
@@ -736,7 +753,11 @@ export class PaymentStore {
     const balances = this.getLedgerBalance(playerId);
     const balance = balances.find((entry) => entry.tokenId === payload.tokenId);
     const available = BigInt(balance?.available ?? '0');
-    if (available < BigInt(payload.amountBaseUnits)) {
+    const requested = BigInt(payload.amountBaseUnits);
+    if (requested <= 0n) {
+      throw new Error('Withdrawal amount must be positive.');
+    }
+    if (available < requested) {
       throw new Error('Insufficient balance for withdrawal.');
     }
 

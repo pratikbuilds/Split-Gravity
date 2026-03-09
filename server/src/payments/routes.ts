@@ -45,7 +45,6 @@ const confirmPaymentIntentSchema = z.object({
 
 const createContestEntrySchema = z.object({
   paymentIntentId: z.string().uuid(),
-  contestId: z.string().min(1),
   nickname: z.string().max(32).optional(),
 });
 
@@ -71,6 +70,10 @@ const handleError = (response: ResponseLike, error: unknown, code: string, statu
     message: error instanceof Error ? error.message : code,
   });
 };
+
+const isUnauthorizedError = (error: unknown) =>
+  error instanceof Error &&
+  (error.message === 'Missing bearer token.' || error.message === 'Session expired.');
 
 export const registerPaymentRoutes = (app: AppLike) => {
   app.post('/auth/wallet/nonce', async (_request: RequestLike, response: ResponseLike) => {
@@ -247,7 +250,12 @@ export const registerPaymentRoutes = (app: AppLike) => {
     try {
       response.json({ balances: paymentService.getLedgerBalance(getBearerToken(request)) });
     } catch (error) {
-      handleError(response, error, 'UNAUTHORIZED', 401);
+      handleError(
+        response,
+        error,
+        isUnauthorizedError(error) ? 'UNAUTHORIZED' : 'INTERNAL_SERVER_ERROR',
+        isUnauthorizedError(error) ? 401 : 500
+      );
     }
   });
 
@@ -257,7 +265,12 @@ export const registerPaymentRoutes = (app: AppLike) => {
         transactions: paymentService.getLedgerTransactions(getBearerToken(request)),
       });
     } catch (error) {
-      handleError(response, error, 'UNAUTHORIZED', 401);
+      handleError(
+        response,
+        error,
+        isUnauthorizedError(error) ? 'UNAUTHORIZED' : 'INTERNAL_SERVER_ERROR',
+        isUnauthorizedError(error) ? 401 : 500
+      );
     }
   });
 

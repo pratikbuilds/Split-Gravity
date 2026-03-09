@@ -6,17 +6,18 @@ const envSchema = z.object({
   LOG_STATE_EVENTS: z
     .union([z.literal('0'), z.literal('1')])
     .optional()
-    .transform((value) => value === '1'),
+    .transform((value: '0' | '1' | undefined) => value === '1'),
   ENABLE_RUNTIME_PERSISTENCE: z
     .union([z.literal('0'), z.literal('1')])
     .optional()
-    .transform((value) => value === '1'),
+    .transform((value: '0' | '1' | undefined) => value === '1'),
   DATABASE_URL: z
     .string()
     .min(1)
     .default('postgres://postgres:postgres@localhost:5432/runner'),
   SOLANA_RPC_HTTP: z.string().url().optional(),
   SOLANA_RPC_WS: z.string().url().optional(),
+  SOCKET_IO_CORS_ORIGINS: z.string().optional(),
   VAULT_PUBLIC_KEY: z.string().min(32).optional(),
   VAULT_SECRET_KEY_JSON: z.string().min(10).optional(),
 });
@@ -31,6 +32,7 @@ export const env = {
   DATABASE_URL: parsedEnv.DATABASE_URL,
   SOLANA_RPC_HTTP: parsedEnv.SOLANA_RPC_HTTP,
   SOLANA_RPC_WS: parsedEnv.SOLANA_RPC_WS,
+  SOCKET_IO_CORS_ORIGINS: parsedEnv.SOCKET_IO_CORS_ORIGINS,
   VAULT_PUBLIC_KEY: parsedEnv.VAULT_PUBLIC_KEY,
   VAULT_SECRET_KEY_JSON: parsedEnv.VAULT_SECRET_KEY_JSON,
 } as const;

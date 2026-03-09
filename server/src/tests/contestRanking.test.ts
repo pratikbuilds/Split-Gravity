@@ -29,7 +29,7 @@ test('single-player contest keeps only the best distance per wallet', () => {
   assert.equal(leaderboard[0]?.rank, 1);
 });
 
-test('contest settlement pays ranked winners from the full entry-fee pool', () => {
+test('contest settlement applies the configured payout table to ranked winners', () => {
   const store = new PaymentStore();
   const [contest] = store.getDailyContests();
 
@@ -51,11 +51,15 @@ test('contest settlement pays ranked winners from the full entry-fee pool', () =
   });
 
   const payouts = store.settleContest(contest.id);
+  const pool = 30_000_000n;
+  const expectedPayouts = contest.payoutBps
+    .slice(0, 3)
+    .map((bps) => ((pool * BigInt(bps)) / 10_000n).toString());
 
   assert.equal(payouts[0]?.rank, 1);
-  assert.equal(payouts[0]?.payoutAmount, '9000000');
-  assert.equal(payouts[1]?.payoutAmount, '6000000');
-  assert.equal(payouts[2]?.payoutAmount, '3600000');
+  assert.equal(payouts[0]?.payoutAmount, expectedPayouts[0]);
+  assert.equal(payouts[1]?.payoutAmount, expectedPayouts[1]);
+  assert.equal(payouts[2]?.payoutAmount, expectedPayouts[2]);
 });
 
 test('winner take all payout credits the winner once', () => {

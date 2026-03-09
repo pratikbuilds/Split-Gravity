@@ -168,7 +168,6 @@ export class MultiplayerMatchController {
       }
       if (this.pendingQueueJoin) {
         this.socket.emit('queue:join', this.pendingQueueJoin);
-        this.pendingQueueJoin = null;
       }
       if (
         !this.pendingCreate &&
@@ -212,7 +211,7 @@ export class MultiplayerMatchController {
       });
     });
 
-    this.socket.on('room:created', ({ roomCode, player }) => {
+    this.socket.on('room:created', ({ roomCode, player, roomKind }) => {
       this.setState({
         roomCode,
         localPlayer: player,
@@ -220,7 +219,8 @@ export class MultiplayerMatchController {
         multiplayerResult: null,
         pendingAction: 'none',
         errorMessage: null,
-        queueStatus: 'matched',
+        roomKind: roomKind ?? this.state.roomKind,
+        queueStatus: roomKind === 'paid_queue' ? 'matched' : 'idle',
         queueEntryId: null,
       });
     });
@@ -301,8 +301,9 @@ export class MultiplayerMatchController {
     });
 
     this.socket.on('queue:state', ({ status, queueEntryId, tokenId, entryFeeTierId, message }) => {
+      this.pendingQueueJoin = null;
       this.setState({
-        pendingAction: status === 'queued' ? 'queueing' : 'none',
+        pendingAction: 'none',
         queueStatus: status,
         queueEntryId: queueEntryId ?? null,
         tokenId: tokenId ?? this.state.tokenId,
@@ -597,7 +598,6 @@ export class MultiplayerMatchController {
     this.connect();
     if (this.socket.connected) {
       this.socket.emit('queue:join', payload);
-      this.pendingQueueJoin = null;
     }
   }
 
@@ -613,13 +613,6 @@ export class MultiplayerMatchController {
     if (this.socket.connected) {
       this.socket.emit('queue:leave', { queueEntryId: queueEntryId ?? undefined });
     }
-
-    this.setState({
-      pendingAction: 'none',
-      queueStatus: 'idle',
-      queueEntryId: null,
-      errorMessage: 'Queue entry cancelled and refunded.',
-    });
   }
 
   readyUp() {

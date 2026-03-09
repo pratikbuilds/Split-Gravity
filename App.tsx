@@ -62,6 +62,8 @@ function getRandomTerrainTheme(previousTheme?: TerrainTheme): TerrainTheme {
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 function AppContent() {
   const [screen, setScreen] = useState<HomeScreenRoute>('home');
   const [mode, setMode] = useState<GameMode>('single_practice');
@@ -75,6 +77,8 @@ function AppContent() {
   const [audioReady, setAudioReady] = useState(false);
   const [localMultiplayerDeathScore, setLocalMultiplayerDeathScore] = useState<number | null>(null);
   const [pendingPaidSession, setPendingPaidSession] = useState<PaidSetupResult | null>(null);
+  const [paidRunSubmissionPending, setPaidRunSubmissionPending] = useState(false);
+  const [paidRunSubmissionError, setPaidRunSubmissionError] = useState<string | null>(null);
 
   const multiplayerControllerRef = useRef<MultiplayerMatchController | null>(null);
   if (!multiplayerControllerRef.current) {
@@ -316,28 +320,73 @@ function AppContent() {
     };
   }, [ensureAudioReady]);
 
+  const submitPaidRunResult = useCallback(
+    async (result: GameResult) => {
+      if (
+        mode !== 'single_paid_contest' ||
+        !pendingPaidSession?.runSessionId ||
+        !pendingPaidSession.accessToken
+      ) {
+        return;
+      }
+
+      setPaidRunSubmissionPending(true);
+      setPaidRunSubmissionError(null);
+
+      const delays = [0, 750, 2_000];
+      let lastError: unknown;
+      for (const delay of delays) {
+        if (delay > 0) {
+          await wait(delay);
+        }
+
+        try {
+          await backendApi.submitRunResult(
+            pendingPaidSession.accessToken,
+            pendingPaidSession.runSessionId,
+            {
+              distance: result.playerScore,
+              finishedAt: new Date().toISOString(),
+            }
+          );
+          setPaidRunSubmissionPending(false);
+          setPaidRunSubmissionError(null);
+          return;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      setPaidRunSubmissionPending(false);
+      setPaidRunSubmissionError(
+        lastError instanceof Error ? lastError.message : 'Paid run submission failed.'
+      );
+    },
+    [mode, pendingPaidSession]
+  );
+
   const handleSinglePlayerGameOver = (result: GameResult) => {
     if (!mode.startsWith('single_')) return;
     setLastResult(result);
     setGameOver(true);
+    setPaidRunSubmissionError(null);
 
     if (
       mode === 'single_paid_contest' &&
       pendingPaidSession?.runSessionId &&
       pendingPaidSession.accessToken
     ) {
-      void backendApi
-        .submitRunResult(pendingPaidSession.accessToken, pendingPaidSession.runSessionId, {
-          distance: result.playerScore,
-          finishedAt: new Date().toISOString(),
-        })
-        .catch((error) => {
-          console.warn('Paid run submission failed:', error);
-        });
+      void submitPaidRunResult(result);
+      return;
     }
+
+    setPaidRunSubmissionPending(false);
   };
 
   const handleRestart = () => {
+    if (mode === 'single_paid_contest' && pendingPaidSession) {
+      return;
+    }
     preloadGameEnvironment();
     preloadCharacters([selectedCharacterId]);
     void ensureAudioReady();
@@ -355,6 +404,8 @@ function AppContent() {
     setGameOver(false);
     setLastResult(null);
     setPendingPaidSession(null);
+    setPaidRunSubmissionPending(false);
+    setPaidRunSubmissionError(null);
     setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
     setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
     setGameKey((k) => k + 1);
@@ -388,6 +439,8 @@ function AppContent() {
     setGameOver(false);
     setLastResult(null);
     setLocalMultiplayerDeathScore(null);
+    setPaidRunSubmissionPending(false);
+    setPaidRunSubmissionError(null);
     if (mode.startsWith('multi_')) {
       multiplayerController.disconnect();
       multiplayerController.resetLobbyState();
@@ -489,6 +542,8 @@ function AppContent() {
       setGameOver(false);
       setLastResult(null);
       setLocalMultiplayerDeathScore(null);
+      setPaidRunSubmissionPending(false);
+      setPaidRunSubmissionError(null);
 
       if (result.selection.purpose === 'single_paid_contest') {
         preloadGameEnvironment();
@@ -546,6 +601,11 @@ function AppContent() {
   const multiplayerResult: MultiplayerResult | null = multiplayerState.multiplayerResult;
   const didWin =
     multiplayerResult && localPlayerId ? multiplayerResult.winnerPlayerId === localPlayerId : false;
+  const isPaidContestRun = mode === 'single_paid_contest' && Boolean(pendingPaidSession);
+  const handleRetryPaidSubmission = useCallback(() => {
+    if (!lastResult) return;
+    void submitPaidRunResult(lastResult);
+  }, [lastResult, submitPaidRunResult]);
 
   return (
     <SafeAreaProvider>
@@ -645,10 +705,39 @@ function AppContent() {
                   <Text style={styles.gameOverTitle}>Game Over</Text>
                   <Text style={styles.gameOverSubtitle}>You fell into the ditch!</Text>
                   <Text style={styles.scoreText}>Score: {lastResult?.playerScore ?? 0}m</Text>
+                  {isPaidContestRun && paidRunSubmissionPending ? (
+                    <Text style={styles.gameOverSubtitle}>Submitting paid run...</Text>
+                  ) : null}
+                  {isPaidContestRun && paidRunSubmissionError ? (
+                    <Text style={styles.gameOverErrorText}>{paidRunSubmissionError}</Text>
+                  ) : null}
                   <View style={styles.gameOverButtons}>
-                    <Pressable style={styles.restartButton} onPress={handleRestart}>
-                      <Text style={styles.buttonText}>Restart</Text>
-                    </Pressable>
+                    {mode === 'single_practice' ? (
+                      <Pressable style={styles.restartButton} onPress={handleRestart}>
+                        <Text style={styles.buttonText}>Restart</Text>
+                      </Pressable>
+                    ) : paidRunSubmissionError ? (
+                      <Pressable style={styles.restartButton} onPress={handleRetryPaidSubmission}>
+                        <Text style={styles.buttonText}>Retry Submission</Text>
+                      </Pressable>
+                    ) : (
+                      <Pressable
+                        style={[
+                          styles.restartButton,
+                          paidRunSubmissionPending ? styles.disabledButton : null,
+                        ]}
+                        disabled={paidRunSubmissionPending}
+                        onPress={() => {
+                          setPendingPaidSession(null);
+                          setPaidRunSubmissionPending(false);
+                          setPaidRunSubmissionError(null);
+                          setScreen('single_mode_select');
+                        }}>
+                        <Text style={styles.buttonText}>
+                          {paidRunSubmissionPending ? 'Submitting...' : 'Play Again'}
+                        </Text>
+                      </Pressable>
+                    )}
                     <Pressable style={styles.exitButton} onPress={handleExitToHome}>
                       <Text style={styles.buttonText}>Exit</Text>
                     </Pressable>
@@ -772,6 +861,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#ffffff',
   },
+  gameOverErrorText: {
+    marginTop: 8,
+    color: '#fecaca',
+    textAlign: 'center',
+  },
   gameOverButtons: {
     flexDirection: 'row',
     gap: 16,
@@ -793,6 +887,9 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#ffffff',
+  },
+  disabledButton: {
+    opacity: 0.7,
   },
   statusChipWrap: {
     position: 'absolute',

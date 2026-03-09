@@ -35,7 +35,7 @@ export async function buildPaymentTransaction({
     SystemProgram.transfer({
       fromPubkey: fromAddress,
       toPubkey: new PublicKey(vaultAddress),
-      lamports: Number(amountLamports),
+      lamports: amountLamports,
     })
   );
   transaction.add(

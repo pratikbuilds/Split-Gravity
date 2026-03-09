@@ -11,7 +11,7 @@
 
 - `server/src/index.ts` mixes HTTP bootstrap, Socket.IO setup, room lifecycle, matchmaking, paid room validation, refunds, and settlement logic.
 - `server/src/payments/service.ts` and `server/src/payments/store.ts` use in-memory `Map`s for sessions, nonces, payment intents, ledger balances, contest state, payouts, and withdrawals.
-- `server/src/payments/store.ts` marks payouts, refunds, and withdrawals as if they happened on chain, but no real vault signer or chain submission exists.
+- `server/src/payments/store.ts` marks payouts, refunds, and withdrawals as if they happened on-chain, but no real vault signer or chain submission exists.
 - `server/src/payments/config.ts` exposes a vault public key only; there is no server-controlled signer abstraction.
 - Backend character validation is already stale relative to the frontend roster.
 - There is no backend README or `.env.example`.
@@ -109,7 +109,7 @@ The backend should have a signer abstraction, not direct ad hoc keypair usage th
 
 ## Solana Flow Choice
 
-- Deposits can follow a Solana Pay style flow or a backend-built unsigned transaction flow.
+- Deposits can follow a Solana Pay-style flow or a backend-built unsigned transaction flow.
 - Payouts and withdrawals should not use a user co-sign path; the backend should build, sign, submit, and confirm these using the custodial vault authority.
 
 ## Testing Strategy

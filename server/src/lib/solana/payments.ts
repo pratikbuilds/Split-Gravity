@@ -91,6 +91,9 @@ export const verifyDepositTransaction = async ({
   if (!transaction) {
     throw new Error('Deposit transaction not found on chain.');
   }
+  if (transaction.meta?.err) {
+    throw new Error(`Deposit transaction ${transactionSignature} failed on chain.`);
+  }
 
   const walletSigner = transaction.transaction.message.accountKeys.some(
     (accountKey) => accountKey.signer && accountKey.pubkey.toBase58() === walletAddress

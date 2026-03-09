@@ -36,7 +36,7 @@ type PaymentServiceOptions = {
   runtimeStateRepository?: RuntimeStateRepository | null;
 };
 
-type WalletAuthSnapshot = {
+type WalletAuthSnapshot = Record<string, unknown> & {
   nonces: WalletNonceRecord[];
   sessions: WalletSessionRecord[];
 };
@@ -255,16 +255,14 @@ export class PaymentService {
       throw new Error('Payment intent not found.');
     }
 
-    if (this.connection) {
-      await verifyDepositTransaction({
-        connection: this.connection,
-        transactionSignature: payload.transactionSignature,
-        walletAddress: payload.walletAddress,
-        vaultAddress: intent.vaultAddress,
-        amountLamports: BigInt(intent.amountBaseUnits),
-        memo: intent.memo,
-      });
-    }
+    await verifyDepositTransaction({
+      connection: this.requireConnection(),
+      transactionSignature: payload.transactionSignature,
+      walletAddress: payload.walletAddress,
+      vaultAddress: intent.vaultAddress,
+      amountLamports: BigInt(intent.amountBaseUnits),
+      memo: intent.memo,
+    });
 
     const confirmed = this.store.confirmPaymentIntent(
       session.playerId,
@@ -415,24 +413,17 @@ export class PaymentService {
       return refund;
     }
 
-    const refund = await sendVaultTransfer({
+    const transfer = await sendVaultTransfer({
       connection: this.connection,
       vaultSigner: this.vaultSigner,
       destinationAddress: player.walletAddress,
       amountLamports: BigInt(intent.amountBaseUnits),
       memo: `runner:refund:${paymentIntentId}`,
-    })
-      .then((transfer) =>
-        this.store.refundPaymentIntent(playerId, paymentIntentId, {
-          description,
-          externalTransferSignature: transfer.transactionSignature,
-        })
-      )
-      .catch(() =>
-        this.store.refundPaymentIntent(playerId, paymentIntentId, {
-          description,
-        })
-      );
+    });
+    const refund = this.store.refundPaymentIntent(playerId, paymentIntentId, {
+      description,
+      externalTransferSignature: transfer.transactionSignature,
+    });
     await this.persistPaymentState();
     return refund;
   }
@@ -456,7 +447,8 @@ export class PaymentService {
       return intent;
     });
 
-    const allSettled = intents.every((intent) => intent.status === 'settled');
+    const unsettledIntents = intents.filter((intent) => intent.status !== 'settled');
+    const allSettled = unsettledIntents.length === 0;
     if (allSettled) {
       const settlement = this.store.settleWinnerTakeAll(winnerPlayerId, paymentIntentIds, {
         description,
@@ -465,7 +457,10 @@ export class PaymentService {
       return settlement;
     }
 
-    const totalAmount = intents.reduce((sum, intent) => sum + BigInt(intent.amountBaseUnits), 0n);
+    const totalAmount = unsettledIntents.reduce(
+      (sum, intent) => sum + BigInt(intent.amountBaseUnits),
+      0n
+    );
     if (!this.connection || !this.vaultSigner) {
       const settlement = this.store.settleWinnerTakeAll(winnerPlayerId, paymentIntentIds, {
         description,
@@ -488,12 +483,10 @@ export class PaymentService {
       });
       await this.persistPaymentState();
       return settlement;
-    } catch {
-      const settlement = this.store.settleWinnerTakeAll(winnerPlayerId, paymentIntentIds, {
-        description,
-      });
-      await this.persistPaymentState();
-      return settlement;
+    } catch (error) {
+      throw new Error(
+        error instanceof Error ? error.message : 'Winner payout transfer failed.'
+      );
     }
   }
 

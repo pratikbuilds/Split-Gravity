@@ -31,7 +31,18 @@ export const SUPPORTED_TOKENS: SupportedToken[] = [
 ];
 
 export const PAYOUT_BPS = DEFAULT_PAYOUT_BPS;
-export const VAULT_PUBLIC_KEY = env.VAULT_PUBLIC_KEY || '2aAv86fEWoQ4TRDq2xjh9cBY1vT6qoLXkDcs4ycE5w1X';
+const DEFAULT_DEV_VAULT_PUBLIC_KEY = '2aAv86fEWoQ4TRDq2xjh9cBY1vT6qoLXkDcs4ycE5w1X';
+const isProduction = process.env.NODE_ENV === 'production';
+
+if (!env.VAULT_PUBLIC_KEY && isProduction) {
+  throw new Error('VAULT_PUBLIC_KEY environment variable is required in production.');
+}
+
+if (!env.VAULT_PUBLIC_KEY && !isProduction) {
+  console.warn('VAULT_PUBLIC_KEY not set, using development fallback public key.');
+}
+
+export const VAULT_PUBLIC_KEY = env.VAULT_PUBLIC_KEY || DEFAULT_DEV_VAULT_PUBLIC_KEY;
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 export const NONCE_TTL_MS = 1000 * 60 * 5;
 

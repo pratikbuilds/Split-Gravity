@@ -40,6 +40,8 @@ export const paymentIntentPurposeEnum = pgEnum('payment_intent_purpose', [
 export const paymentIntentStatusEnum = pgEnum('payment_intent_status', [
   'pending',
   'confirmed',
+  'refunded',
+  'settled',
   'expired',
 ]);
 export const wagerStatusEnum = pgEnum('wager_status', [
@@ -81,15 +83,21 @@ export const walletNonces = pgTable('wallet_nonces', {
   consumedAt: timestamp('consumed_at', { withTimezone: true }),
 });
 
-export const walletSessions = pgTable('wallet_sessions', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  playerId: uuid('player_id')
-    .references(() => players.id)
-    .notNull(),
-  token: varchar('token', { length: 128 }).notNull(),
-  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
+export const walletSessions = pgTable(
+  'wallet_sessions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    playerId: uuid('player_id')
+      .references(() => players.id)
+      .notNull(),
+    token: varchar('token', { length: 128 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    tokenIdx: uniqueIndex('wallet_sessions_token_idx').on(table.token),
+  })
+);
 
 export const supportedTokens = pgTable('supported_tokens', {
   id: varchar('id', { length: 64 }).primaryKey(),
@@ -137,41 +145,55 @@ export const dailyContests = pgTable(
   })
 );
 
-export const paymentIntents = pgTable('payment_intents', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  playerId: uuid('player_id')
-    .references(() => players.id)
-    .notNull(),
-  tokenId: varchar('token_id', { length: 64 })
-    .references(() => supportedTokens.id)
-    .notNull(),
-  entryFeeTierId: varchar('entry_fee_tier_id', { length: 64 })
-    .references(() => entryFeeTiers.id)
-    .notNull(),
-  purpose: paymentIntentPurposeEnum('purpose').notNull(),
-  contestId: varchar('contest_id', { length: 128 }).references(() => dailyContests.id),
-  status: paymentIntentStatusEnum('status').default('pending').notNull(),
-  memo: varchar('memo', { length: 128 }).notNull(),
-  vaultAddress: varchar('vault_address', { length: 64 }).notNull(),
-  transactionSignature: varchar('transaction_signature', { length: 128 }),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
-  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-});
+export const paymentIntents = pgTable(
+  'payment_intents',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    playerId: uuid('player_id')
+      .references(() => players.id)
+      .notNull(),
+    tokenId: varchar('token_id', { length: 64 })
+      .references(() => supportedTokens.id)
+      .notNull(),
+    entryFeeTierId: varchar('entry_fee_tier_id', { length: 64 })
+      .references(() => entryFeeTiers.id)
+      .notNull(),
+    purpose: paymentIntentPurposeEnum('purpose').notNull(),
+    contestId: varchar('contest_id', { length: 128 }).references(() => dailyContests.id),
+    status: paymentIntentStatusEnum('status').default('pending').notNull(),
+    memo: varchar('memo', { length: 128 }).notNull(),
+    vaultAddress: varchar('vault_address', { length: 64 }).notNull(),
+    transactionSignature: varchar('transaction_signature', { length: 128 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    transactionSignatureIdx: uniqueIndex('payment_intents_transaction_signature_idx').on(
+      table.transactionSignature
+    ),
+  })
+);
 
-export const contestEntries = pgTable('contest_entries', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  playerId: uuid('player_id')
-    .references(() => players.id)
-    .notNull(),
-  contestId: varchar('contest_id', { length: 128 })
-    .references(() => dailyContests.id)
-    .notNull(),
-  paymentIntentId: uuid('payment_intent_id')
-    .references(() => paymentIntents.id)
-    .notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
+export const contestEntries = pgTable(
+  'contest_entries',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    playerId: uuid('player_id')
+      .references(() => players.id)
+      .notNull(),
+    contestId: varchar('contest_id', { length: 128 })
+      .references(() => dailyContests.id)
+      .notNull(),
+    paymentIntentId: uuid('payment_intent_id')
+      .references(() => paymentIntents.id)
+      .notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    paymentIntentIdx: uniqueIndex('contest_entries_payment_intent_idx').on(table.paymentIntentId),
+  })
+);
 
 export const runSessions = pgTable('run_sessions', {
   id: uuid('id').defaultRandom().primaryKey(),
