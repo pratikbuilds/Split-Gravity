@@ -13,6 +13,8 @@ export type GravityDirection = 1 | -1;
 
 export type GameCanvasProps = {
   restartKey?: number;
+  /** When set, shuffles level section order for variety (paid matches, etc.) */
+  levelSeed?: number;
   onExit?: () => void;
   onGameOver?: (result: GameResult) => void;
   onAudioEvent?: (event: GameAudioEvent) => void;

@@ -8,7 +8,7 @@ import { env } from '../config/env';
 
 export const createSocketServer = (app: Parameters<typeof createServer>[0]) => {
   const httpServer = createServer(app);
-  const allowedOrigins = env.SOCKET_IO_CORS_ORIGINS?.split(',')
+  const allowedOrigins = (env.SOCKET_IO_CORS_ORIGINS?.split(',') ?? [])
     .map((origin) => origin.trim())
     .filter(Boolean);
   const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
@@ -18,7 +18,12 @@ export const createSocketServer = (app: Parameters<typeof createServer>[0]) => {
           callback(null, true);
           return;
         }
-        if (allowedOrigins?.includes(origin)) {
+        // When no allowlist is configured, allow all origins (e.g. production mobile apps).
+        if (allowedOrigins.length === 0) {
+          callback(null, true);
+          return;
+        }
+        if (allowedOrigins.includes(origin)) {
           callback(null, true);
           return;
         }

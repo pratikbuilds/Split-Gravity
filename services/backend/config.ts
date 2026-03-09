@@ -1,7 +1,7 @@
 import { NativeModules, Platform } from 'react-native';
 
 const FALLBACK_SERVER_PORT = 4100;
-const DEFAULT_BACKEND_SERVER_URL = 'https://split-gravity-production.up.railway.app';
+const DEFAULT_BACKEND_SERVER_URL = 'https://gravity-jump-production.up.railway.app';
 
 const resolveDefaultServerUrl = () => {
   const sourceUrl: string | undefined = NativeModules?.SourceCode?.scriptURL;

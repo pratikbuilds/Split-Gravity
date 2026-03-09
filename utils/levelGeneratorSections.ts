@@ -147,6 +147,23 @@ function getValidatedSections(): LevelSection[] {
 
 const VALIDATED_SECTIONS = getValidatedSections();
 
+/** Deterministic shuffle for reproducible level variety (e.g. paid matches) */
+function seededShuffle<T>(arr: T[], seed: number): T[] {
+  const result = [...arr];
+  let s = seed;
+  for (let i = result.length - 1; i > 0; i--) {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    const j = s % (i + 1);
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+function getSectionsForConfig(config: LevelGeneratorConfig): LevelSection[] {
+  if (config.sectionOrderSeed == null) return VALIDATED_SECTIONS;
+  return seededShuffle(VALIDATED_SECTIONS, config.sectionOrderSeed);
+}
+
 function buildFallbackMainChunk(startX: number, config: LevelGeneratorConfig): Chunk {
   const width = Math.max(config.tileSize, FALLBACK_SECTION_WIDTH_TILES * config.tileSize);
   const platformHeight = config.tileSize * 2;
@@ -162,12 +179,16 @@ function buildFallbackMainChunk(startX: number, config: LevelGeneratorConfig): C
   };
 }
 
-function generateChunk(startX: number, config: LevelGeneratorConfig): Chunk {
+function generateChunk(
+  startX: number,
+  config: LevelGeneratorConfig,
+  sections: LevelSection[] = VALIDATED_SECTIONS
+): Chunk {
   if (startX < FLAT_ZONE_LENGTH) {
     return buildIntroChunk(startX, config.groundY, config.tileSize);
   }
 
-  const validSections = VALIDATED_SECTIONS;
+  const validSections = sections;
   if (validSections.length === 0) {
     return buildFallbackMainChunk(startX, config);
   }
@@ -203,6 +224,7 @@ export function generateLevelChunks(
   existingChunks: Chunk[],
   options?: { disableTrim?: boolean }
 ): Chunk[] {
+  const sections = getSectionsForConfig(config);
   const chunks = [...existingChunks];
   const spawnThreshold = totalScroll + config.screenWidth * 2;
   const maxChunkAddsPerTick = 6;
@@ -213,7 +235,7 @@ export function generateLevelChunks(
     const nextSpawnX = lastChunk ? getChunkEndX(lastChunk) : 0;
     if (nextSpawnX >= spawnThreshold) break;
 
-    const chunk = generateChunk(nextSpawnX, config);
+    const chunk = generateChunk(nextSpawnX, config, sections);
     chunks.push(chunk);
     iterations += 1;
   }

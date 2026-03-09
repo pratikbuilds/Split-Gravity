@@ -65,6 +65,8 @@ export interface LevelGeneratorConfig {
   groundY: number;
   tileSize: number;
   screenWidth: number;
+  /** When set, shuffles section order deterministically for level variety (e.g. paid matches) */
+  sectionOrderSeed?: number;
 }
 
 // Reachability constants (tune from physics)

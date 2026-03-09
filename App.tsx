@@ -65,6 +65,14 @@ function getRandomTerrainTheme(previousTheme?: TerrainTheme): TerrainTheme {
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
+function hashStringToSeed(str: string): number {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h) || 1;
+}
+
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const buildPostPaymentHandoff = (result: PaidSetupResult): PostPaymentHandoff => {
@@ -120,6 +128,7 @@ function AppContent() {
   const [screen, setScreen] = useState<HomeScreenRoute>('home');
   const [mode, setMode] = useState<GameMode>('single_practice');
   const [gameKey, setGameKey] = useState(0);
+  const [levelSeed, setLevelSeed] = useState<number | undefined>(undefined);
   const [lastResult, setLastResult] = useState<GameResult | null>(null);
   const [gameOver, setGameOver] = useState(false);
   const [backgroundIndex, setBackgroundIndex] = useState(() => getRandomBackgroundIndex());
@@ -163,6 +172,7 @@ function AppContent() {
   const audioSetupPromiseRef = useRef<Promise<void> | null>(null);
   const mountedRef = useRef(true);
   const assetPreloadPromisesRef = useRef(new Map<number, Promise<void>>());
+  const singlePlayLaunchRequestRef = useRef(0);
 
   const preloadAssets = useCallback(async (sources: readonly number[]) => {
     const uniqueSources = Array.from(new Set(sources));
@@ -197,14 +207,14 @@ function AppContent() {
   }, []);
 
   const preloadGameEnvironment = useCallback(() => {
-    void preloadAssets(GAME_ENVIRONMENT_ASSETS);
+    return preloadAssets(GAME_ENVIRONMENT_ASSETS);
   }, [preloadAssets]);
 
   const preloadCharacters = useCallback(
     (characterIds: readonly (CharacterId | null | undefined)[]) => {
       const characterAssets = getCharacterAssets(characterIds);
-      if (characterAssets.length === 0) return;
-      void preloadAssets(characterAssets);
+      if (characterAssets.length === 0) return Promise.resolve();
+      return preloadAssets(characterAssets);
     },
     [preloadAssets]
   );
@@ -339,21 +349,29 @@ function AppContent() {
     if (multiplayerState.matchStatus !== 'running') return;
     if (!hasMultiplayerPair) return;
 
-    preloadGameEnvironment();
-    preloadCharacters([selectedCharacterId, multiplayerState.opponent?.characterId]);
-    void ensureAudioReady();
     setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
     setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
     setLocalMultiplayerDeathScore(null);
     setGameOver(false);
     setLastResult(null);
+    setLevelSeed(
+      multiplayerState.roomCode
+        ? hashStringToSeed(multiplayerState.roomCode)
+        : Math.floor(Math.random() * 0x7fffffff)
+    );
     setGameKey((k) => k + 1);
     setScreen('game');
+    void Promise.all([
+      preloadGameEnvironment(),
+      preloadCharacters([selectedCharacterId, multiplayerState.opponent?.characterId]),
+      ensureAudioReady(),
+    ]);
   }, [
     hasMultiplayerPair,
     mode,
     multiplayerState.matchStatus,
     multiplayerState.opponent?.characterId,
+    multiplayerState.roomCode,
     ensureAudioReady,
     preloadGameEnvironment,
     preloadCharacters,
@@ -449,13 +467,12 @@ function AppContent() {
     setGameOver(false);
     setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
     setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
+    setLevelSeed(Math.floor(Math.random() * 0x7fffffff));
     setGameKey((k) => k + 1);
   };
 
   const handleSinglePlay = useCallback(() => {
-    preloadGameEnvironment();
-    preloadCharacters([selectedCharacterId]);
-    void ensureAudioReady();
+    singlePlayLaunchRequestRef.current += 1;
     setMode('single_practice');
     setGameOver(false);
     setLastResult(null);
@@ -468,8 +485,14 @@ function AppContent() {
     setPaidRunSubmissionError(null);
     setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
     setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
+    setLevelSeed(Math.floor(Math.random() * 0x7fffffff));
     setGameKey((k) => k + 1);
     setScreen('game');
+    void Promise.all([
+      preloadGameEnvironment(),
+      preloadCharacters([selectedCharacterId]),
+      ensureAudioReady(),
+    ]);
   }, [ensureAudioReady, preloadCharacters, preloadGameEnvironment, selectedCharacterId]);
 
   const handleMultiplay = () => {
@@ -481,6 +504,7 @@ function AppContent() {
   }, []);
 
   const handleReturnHome = useCallback(() => {
+    singlePlayLaunchRequestRef.current += 1;
     setScreen('home');
   }, []);
 
@@ -495,6 +519,7 @@ function AppContent() {
   }, []);
 
   const handleExitToHome = () => {
+    singlePlayLaunchRequestRef.current += 1;
     triggerSound('land');
     setGameOver(false);
     setLastResult(null);
@@ -572,10 +597,11 @@ function AppContent() {
   const handleSingleModeSelect = useCallback(
     (nextMode: SinglePlayerMenuMode) => {
       if (nextMode === 'practice') {
-        handleSinglePlay();
+        void handleSinglePlay();
         return;
       }
 
+      singlePlayLaunchRequestRef.current += 1;
       setScreen('single_paid_setup');
     },
     [handleSinglePlay]
@@ -669,17 +695,20 @@ function AppContent() {
           setPendingPaidSession(nextSession);
         }
 
-        preloadGameEnvironment();
-        preloadCharacters([selectedCharacterId]);
-        await ensureAudioReady();
         setMode('single_paid_contest');
         setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
         setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
         setGameOver(false);
         setLastResult(null);
         setPostPaymentHandoff(null);
+        setLevelSeed(Math.floor(Math.random() * 0x7fffffff));
         setGameKey((k) => k + 1);
         setScreen('game');
+        void Promise.all([
+          preloadGameEnvironment(),
+          preloadCharacters([selectedCharacterId]),
+          ensureAudioReady(),
+        ]);
         return;
       }
 
@@ -859,6 +888,7 @@ function AppContent() {
           <>
             <GameCanvas
               restartKey={gameKey}
+              levelSeed={levelSeed}
               onExit={handleExitToHome}
               onGameOver={handleSinglePlayerGameOver}
               onAudioEvent={triggerSound}
@@ -900,28 +930,11 @@ function AppContent() {
                       <Pressable style={styles.restartButton} onPress={handleRestart}>
                         <Text style={styles.buttonText}>Restart</Text>
                       </Pressable>
-                    ) : paidRunSubmissionError ? (
+                    ) : isPaidContestRun && paidRunSubmissionError ? (
                       <Pressable style={styles.restartButton} onPress={handleRetryPaidSubmission}>
                         <Text style={styles.buttonText}>Retry Submission</Text>
                       </Pressable>
-                    ) : (
-                      <Pressable
-                        style={[
-                          styles.restartButton,
-                          paidRunSubmissionPending ? styles.disabledButton : null,
-                        ]}
-                        disabled={paidRunSubmissionPending}
-                        onPress={() => {
-                          setPendingPaidSession(null);
-                          setPaidRunSubmissionPending(false);
-                          setPaidRunSubmissionError(null);
-                          setScreen('single_mode_select');
-                        }}>
-                        <Text style={styles.buttonText}>
-                          {paidRunSubmissionPending ? 'Submitting...' : 'Play Again'}
-                        </Text>
-                      </Pressable>
-                    )}
+                    ) : null}
                     <Pressable style={styles.exitButton} onPress={handleExitToHome}>
                       <Text style={styles.buttonText}>Exit</Text>
                     </Pressable>

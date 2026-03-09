@@ -9,6 +9,7 @@ import type { GravityDirection, SimulationRefs } from './types';
 
 interface UseScoreAndChunksArgs {
   restartKey: number;
+  levelSeed?: number;
   width: number;
   height: number;
   groundY: number;
@@ -42,6 +43,7 @@ export interface UseScoreAndChunksResult {
 
 export const useScoreAndChunks = ({
   restartKey,
+  levelSeed,
   width,
   height,
   groundY,
@@ -83,10 +85,25 @@ export const useScoreAndChunks = ({
     lastSpawnAt.value = 0;
     scoreValue.value = 0;
 
-    const config = { groundY, tileSize, screenWidth: width };
+    const config = {
+      groundY,
+      tileSize,
+      screenWidth: width,
+      ...(levelSeed != null && { sectionOrderSeed: levelSeed }),
+    };
     const initialChunks = preGenerateLevelChunks(config);
     setChunks(initialChunks);
-  }, [groundY, height, initialGravityDirection, lastSpawnAt, refs, restartKey, scoreValue, width]);
+  }, [
+    groundY,
+    height,
+    initialGravityDirection,
+    lastSpawnAt,
+    levelSeed,
+    refs,
+    restartKey,
+    scoreValue,
+    width,
+  ]);
 
   useEffect(() => {
     const rects: number[] = [];
@@ -102,7 +119,12 @@ export const useScoreAndChunks = ({
     lastSpawnRef.current = scroll + 200;
 
     const currentChunks = chunksRef.current;
-    const config = { groundY, tileSize, screenWidth: width };
+    const config = {
+      groundY,
+      tileSize,
+      screenWidth: width,
+      ...(levelSeed != null && { sectionOrderSeed: levelSeed }),
+    };
     const newChunks = generateLevelChunks(config, scroll, currentChunks);
     const chunksChanged =
       newChunks.length !== currentChunks.length ||
@@ -110,7 +132,7 @@ export const useScoreAndChunks = ({
     if (chunksChanged) {
       setChunks(newChunks);
     }
-  }, [groundY, refs.totalScroll, width]);
+  }, [groundY, levelSeed, refs.totalScroll, width]);
 
   // Score updates live on the UI thread via SharedValue — no React re-renders.
   // ScoreOverlay subscribes independently and only re-renders itself.

@@ -262,6 +262,7 @@ const DebugOverlay = React.memo(
 
 export const GameCanvas = ({
   restartKey = 0,
+  levelSeed,
   onExit,
   onGameOver,
   onAudioEvent,
@@ -381,6 +382,7 @@ export const GameCanvas = ({
   const charSize = CHAR_SIZE * CHAR_SCALE;
   const { scoreValue, platforms } = useScoreAndChunks({
     restartKey,
+    levelSeed,
     width,
     height,
     groundY: stableGroundY,

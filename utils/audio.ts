@@ -28,16 +28,17 @@ export async function configureAudioMode() {
 
 export async function loadSounds() {
   const keys = Object.keys(SOUND_SOURCES) as SoundKey[];
-  const loaded = {} as LoadedSounds;
-  for (const key of keys) {
-    const { sound } = await Audio.Sound.createAsync(SOUND_SOURCES[key], {
-      shouldPlay: false,
-      volume: 1,
-      isLooping: false,
-    });
-    loaded[key] = sound;
-  }
-  return loaded;
+  const entries = await Promise.all(
+    keys.map(async (key) => {
+      const { sound } = await Audio.Sound.createAsync(SOUND_SOURCES[key], {
+        shouldPlay: false,
+        volume: 1,
+        isLooping: false,
+      });
+      return [key, sound] as const;
+    })
+  );
+  return Object.fromEntries(entries) as LoadedSounds;
 }
 
 export async function unloadSounds(sounds: Partial<LoadedSounds>) {
