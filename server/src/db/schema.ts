@@ -110,7 +110,8 @@ export const characterGenerationJobs = pgTable('character_generation_jobs', {
   displayName: varchar('display_name', { length: 64 }),
   prompt: text('prompt'),
   referenceImageDataUrl: text('reference_image_data_url'),
-  paymentIntentId: uuid('payment_intent_id').references(() => paymentIntents.id),
+  // No FK: payment intents live in PaymentStore (runtime snapshot), not in payment_intents table
+  paymentIntentId: uuid('payment_intent_id'),
   status: characterGenerationJobStatusEnum('status').default('queued').notNull(),
   failureMessage: text('failure_message'),
   resultCharacterId: uuid('result_character_id').references(() => customCharacters.id),

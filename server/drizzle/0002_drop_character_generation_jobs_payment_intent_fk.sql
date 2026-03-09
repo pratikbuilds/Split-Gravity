@@ -1,0 +1,1 @@
+ALTER TABLE "character_generation_jobs" DROP CONSTRAINT IF EXISTS "character_generation_jobs_payment_intent_id_payment_intents_id_fk";

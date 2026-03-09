@@ -297,3 +297,8 @@ export const backendApi = {
 };
 
 export { ApiError };
+
+/** True when the backend rejected the token (401 or "Session expired."). Call clearSession and prompt re-sign-in. */
+export const isSessionExpiredError = (error: unknown): boolean =>
+  error instanceof ApiError &&
+  (error.status === 401 || error.message === 'Session expired.');

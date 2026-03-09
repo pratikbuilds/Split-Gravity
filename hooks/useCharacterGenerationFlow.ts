@@ -1,17 +1,19 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as ImagePicker from 'expo-image-picker';
-import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { NativeModules, Platform } from 'react-native';
 import type {
   CharacterGenerationConfigResponse,
   CharacterGenerationJobSummary,
 } from '../shared/character-generation-contracts';
-import { backendApi } from '../services/backend/api';
+import { backendApi, isSessionExpiredError } from '../services/backend/api';
 import { fundPaymentIntent } from '../services/payments/fundPaymentIntent';
 import { useWalletSession } from './useWalletSession';
 
 const PENDING_JOBS_STORAGE_KEY = 'my-expo-app:character-generation-job-ids';
+const MISSING_IMAGE_PICKER_MESSAGE =
+  'Image picker is not available in this build. If using a development build: run "npx expo prebuild --clean" then "npx expo run:ios" or "npx expo run:android" and reinstall. If using Expo Go: update the Expo Go app to the latest version.';
+const MISSING_NOTIFICATIONS_MESSAGE =
+  'Push notifications are unavailable in the current app build. Rebuild and reinstall the Expo development build after adding expo-notifications.';
 
 const mergeJobs = (
   existing: CharacterGenerationJobSummary[],
@@ -26,6 +28,9 @@ const mergeJobs = (
 
 export const useCharacterGenerationFlow = () => {
   const walletSession = useWalletSession();
+  const walletSessionRef = useRef(walletSession);
+  walletSessionRef.current = walletSession;
+
   const [config, setConfig] = useState<CharacterGenerationConfigResponse | null>(null);
   const [jobs, setJobs] = useState<CharacterGenerationJobSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -34,31 +39,49 @@ export const useCharacterGenerationFlow = () => {
 
   const registerPushToken = useCallback(async () => {
     if (Platform.OS === 'web') return;
-    if (!walletSession.walletAddress) return;
-    const accessToken = await walletSession.ensureAccessToken();
-    const { status } = await Notifications.requestPermissionsAsync();
-    if (status !== 'granted') return;
-    const token = await Notifications.getExpoPushTokenAsync();
-    await backendApi.registerExpoPushToken(accessToken, {
-      expoPushToken: token.data,
-      platform: Platform.OS === 'android' ? 'android' : 'ios',
-    });
-  }, [walletSession]);
+    const ws = walletSessionRef.current;
+    // Only register when we already have a valid session — never prompt for sign on screen open
+    if (!ws.walletAddress || !ws.hasValidSession || !ws.storedSession) return;
+    if (!NativeModules.ExpoPushTokenManager) return; // Skip when native module not in build
+    try {
+      const Notifications = await import('expo-notifications');
+      const api = Notifications?.default ?? Notifications;
+      if (
+        typeof api?.requestPermissionsAsync !== 'function' ||
+        typeof api?.getExpoPushTokenAsync !== 'function'
+      ) {
+        return;
+      }
+      const { status } = await api.requestPermissionsAsync();
+      if (status !== 'granted') return;
+      const token = await api.getExpoPushTokenAsync();
+      await backendApi.registerExpoPushToken(ws.storedSession.accessToken, {
+        expoPushToken: token.data,
+        platform: Platform.OS === 'android' ? 'android' : 'ios',
+      });
+    } catch {
+      // ExpoPushTokenManager missing or permission denied; skip silently
+    }
+  }, [walletSession.walletAddress, walletSession.hasValidSession]);
 
   const refresh = useCallback(async () => {
+    const ws = walletSessionRef.current;
     try {
       setLoading(true);
       setError(null);
       const nextConfig = await backendApi.getCharacterGenerationConfig();
       setConfig(nextConfig);
 
-      if (!walletSession.walletAddress) {
+      if (!ws.walletAddress) {
         setJobs([]);
         return;
       }
-
-      const accessToken = await walletSession.ensureAccessToken();
-      const response = await backendApi.getCharacterGenerationJobs(accessToken);
+      // Only fetch jobs when we already have a valid session — never trigger sign on screen open
+      if (!ws.hasValidSession || !ws.storedSession) {
+        setJobs([]);
+        return;
+      }
+      const response = await backendApi.getCharacterGenerationJobs(ws.storedSession.accessToken);
       setJobs(response.jobs);
       await AsyncStorage.setItem(
         PENDING_JOBS_STORAGE_KEY,
@@ -69,39 +92,66 @@ export const useCharacterGenerationFlow = () => {
         )
       );
     } catch (nextError) {
-      setError(
-        nextError instanceof Error ? nextError.message : 'Failed to load generation status.'
-      );
+      if (isSessionExpiredError(nextError)) {
+        await ws.clearSession();
+        setError('Session expired. Please sign in again.');
+      } else {
+        setError(
+          nextError instanceof Error ? nextError.message : 'Failed to load generation status.'
+        );
+      }
     } finally {
       setLoading(false);
     }
-  }, [walletSession]);
+  }, [walletSession.walletAddress, walletSession.hasValidSession]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
   useEffect(() => {
-    void registerPushToken().catch((nextError) => {
-      console.warn('Expo push token registration failed:', nextError);
-    });
+    void registerPushToken();
   }, [registerPushToken]);
 
   const pickReferenceImage = useCallback(async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 1,
-      base64: true,
-      allowsEditing: false,
-    });
+    try {
+      const ImagePicker = await import('expo-image-picker');
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-    if (result.canceled || !result.assets[0]?.base64) {
+      if (permission.status !== 'granted') {
+        setError('Photo library permission is required to upload a reference image.');
+        return null;
+      }
+
+      setError(null);
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 1,
+        base64: true,
+        allowsEditing: false,
+      });
+
+      if (result.canceled || !result.assets[0]?.base64) {
+        return null;
+      }
+
+      const asset = result.assets[0];
+      const mimeType = asset.mimeType || 'image/png';
+      return `data:${mimeType};base64,${asset.base64}`;
+    } catch (nextError) {
+      const nextMessage =
+        nextError instanceof Error &&
+        (nextError.message.includes('ExponentImagePicker') ||
+          nextError.message.includes('ImagePicker') ||
+          nextError.message.includes('native module'))
+          ? MISSING_IMAGE_PICKER_MESSAGE
+          : nextError instanceof Error
+            ? nextError.message
+            : 'Failed to open the image library.';
+      setError(nextMessage);
       return null;
     }
-
-    const asset = result.assets[0];
-    const mimeType = asset.mimeType || 'image/png';
-    return `data:${mimeType};base64,${asset.base64}`;
   }, []);
 
   const submitGeneration = useCallback(
@@ -157,9 +207,14 @@ export const useCharacterGenerationFlow = () => {
         );
         return response.job;
       } catch (nextError) {
-        setError(
-          nextError instanceof Error ? nextError.message : 'Failed to submit generation job.'
-        );
+        if (isSessionExpiredError(nextError)) {
+          await walletSession.clearSession();
+          setError('Session expired. Please sign in again.');
+        } else {
+          setError(
+            nextError instanceof Error ? nextError.message : 'Failed to submit generation job.'
+          );
+        }
         throw nextError;
       } finally {
         setSubmitting(false);
