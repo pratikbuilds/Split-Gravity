@@ -1,4 +1,4 @@
-import type { CharacterId } from '../../shared/characters';
+import { isPresetCharacterId, type CharacterId } from '../../shared/characters';
 import type { TerrainTheme } from '../../types/game';
 import { GAME_BACKGROUNDS } from '../../utils/backgrounds';
 import { CHARACTER_DEFINITIONS, getCharacterDefinitionOrDefault } from './characterSpritePresets';
@@ -102,7 +102,10 @@ export const getCharacterAssets = (
   return Array.from(
     new Set(
       characterIds
-        .filter((characterId): characterId is CharacterId => characterId != null)
+        .filter(
+          (characterId): characterId is CharacterId =>
+            characterId != null && isPresetCharacterId(characterId)
+        )
         .map((characterId) => getCharacterDefinitionOrDefault(characterId).spritePreset.imageSource)
     )
   );

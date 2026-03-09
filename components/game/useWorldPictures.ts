@@ -87,7 +87,9 @@ interface UseWorldPicturesArgs {
   backgroundIndex: number;
   terrainTheme: TerrainTheme;
   characterId?: CharacterId;
+  characterCustomSpriteUrl?: string | null;
   opponentCharacterId?: CharacterId;
+  opponentCustomSpriteUrl?: string | null;
   platforms: Platform[];
   refs: Pick<
     SimulationRefs,
@@ -115,10 +117,42 @@ export const useWorldPictures = ({
   backgroundIndex,
   terrainTheme,
   characterId,
+  characterCustomSpriteUrl,
   opponentCharacterId,
+  opponentCustomSpriteUrl,
   platforms,
   refs,
 }: UseWorldPicturesArgs) => {
+  const resolveGeneratedPreset = (imageWidth: number, imageHeight: number): CharacterSpritePreset => {
+    const cellWidth = Math.floor(imageWidth / 6);
+    const cellHeight = Math.floor(imageHeight / 3);
+    const rowFrames = (row: number, count = 6): SpriteFrame[] =>
+      Array.from({ length: count }, (_, index) => ({
+        x: cellWidth * index,
+        y: cellHeight * row,
+        width: cellWidth,
+        height: cellHeight,
+      }));
+
+    return {
+      imageSource: 0,
+      renderScaleMultiplier: 1.2,
+      feetTrimPx: 0,
+      frameSlowdowns: {
+        idle: 4,
+        run: 1,
+        jump: 2,
+        fall: 2,
+      },
+      actions: {
+        run: rowFrames(0),
+        jump: rowFrames(1, 3),
+        fall: rowFrames(1).slice(3, 5),
+        idle: rowFrames(2),
+      },
+    };
+  };
+
   const totalBackgrounds = GAME_BACKGROUNDS.length;
   const safeBackgroundIndex =
     totalBackgrounds > 0
@@ -144,11 +178,29 @@ export const useWorldPictures = ({
   const middlePlatformLeftImage = useImage(MIDDLE_PLATFORM_ASSETS.left);
   const middlePlatformCenterImage = useImage(MIDDLE_PLATFORM_ASSETS.center);
   const middlePlatformRightImage = useImage(MIDDLE_PLATFORM_ASSETS.right);
-  const characterPreset = getCharacterPresetOrDefault(characterId);
+  const fallbackCharacterPreset = getCharacterPresetOrDefault(characterId);
   const hasOpponentCharacter = opponentCharacterId != null;
-  const opponentPreset = getCharacterPresetOrDefault(opponentCharacterId);
-  const characterImage = useSkiaImageAsset(characterPreset.imageSource);
-  const opponentImage = useSkiaImageAsset(hasOpponentCharacter ? opponentPreset.imageSource : null);
+  const fallbackOpponentPreset = getCharacterPresetOrDefault(opponentCharacterId);
+  const characterImage = useSkiaImageAsset(
+    characterCustomSpriteUrl ?? fallbackCharacterPreset.imageSource
+  );
+  const opponentImage = useSkiaImageAsset(
+    hasOpponentCharacter
+      ? opponentCustomSpriteUrl ?? fallbackOpponentPreset.imageSource
+      : null
+  );
+  const characterPreset = useMemo(() => {
+    if (characterCustomSpriteUrl && characterImage) {
+      return resolveGeneratedPreset(characterImage.width(), characterImage.height());
+    }
+    return fallbackCharacterPreset;
+  }, [characterCustomSpriteUrl, characterImage, fallbackCharacterPreset]);
+  const opponentPreset = useMemo(() => {
+    if (opponentCustomSpriteUrl && opponentImage) {
+      return resolveGeneratedPreset(opponentImage.width(), opponentImage.height());
+    }
+    return fallbackOpponentPreset;
+  }, [fallbackOpponentPreset, opponentCustomSpriteUrl, opponentImage]);
 
   const characterTransforms = useRSXformBuffer(1, (val) => {
     'worklet';

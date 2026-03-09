@@ -10,6 +10,7 @@ export interface PlayerSession {
   clientId: string;
   nickname: string;
   characterId: CharacterId;
+  customCharacterVersionId?: string;
   alive: boolean;
   connected: boolean;
 }
@@ -57,6 +58,7 @@ export interface RoomCreatePayload {
   nickname: string;
   clientId: string;
   characterId: CharacterId;
+  customCharacterVersionId?: string;
   accessToken?: string;
   roomKind?: MatchRoomKind;
   tokenId?: string;
@@ -69,6 +71,7 @@ export interface RoomJoinPayload {
   nickname: string;
   clientId: string;
   characterId: CharacterId;
+  customCharacterVersionId?: string;
   accessToken?: string;
   roomKind?: MatchRoomKind;
   tokenId?: string;
@@ -102,6 +105,7 @@ export interface QueueJoinPayload {
   nickname: string;
   clientId: string;
   characterId: CharacterId;
+  customCharacterVersionId?: string;
   accessToken: string;
   tokenId: string;
   entryFeeTierId: string;

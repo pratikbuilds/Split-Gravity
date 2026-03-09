@@ -30,6 +30,7 @@ import {
   type ServerPlayer,
 } from './runtime';
 import { paymentService } from '../payments/service';
+import { characterGenerationService } from '../modules/character-generation';
 
 const PORT = env.PORT;
 const RECONNECT_GRACE_MS = 10_000;
@@ -40,6 +41,7 @@ const LOG_STATE_EVENTS = env.LOG_STATE_EVENTS;
 
 export const startServer = async () => {
   await paymentService.initialize();
+  await characterGenerationService.startWorker();
 
   const app = createHttpApp();
   const { httpServer, io } = createSocketServer(app);
@@ -476,6 +478,7 @@ export const startServer = async () => {
         nickname,
         clientId,
         characterId,
+        customCharacterVersionId,
         accessToken,
         roomKind,
         tokenId,
@@ -588,6 +591,7 @@ export const startServer = async () => {
           clientId,
           nickname: sanitizeNickname(nickname, 'Player 1'),
           characterId: safeCharacterId,
+          customCharacterVersionId,
           alive: true,
           connected: true,
           socketId: socket.id,
@@ -618,6 +622,7 @@ export const startServer = async () => {
           clientId,
           nickname: player.nickname,
           characterId: player.characterId,
+          customCharacterVersionId: player.customCharacterVersionId,
           roomKind: room.roomKind,
           socketId: socket.id,
         });
@@ -632,6 +637,7 @@ export const startServer = async () => {
         nickname,
         clientId,
         characterId,
+        customCharacterVersionId,
         accessToken,
         tokenId,
         entryFeeTierId,
@@ -712,6 +718,7 @@ export const startServer = async () => {
           player.lastSeenAt = Date.now();
           player.nickname = sanitizeNickname(nickname, player.nickname);
           player.characterId = safeCharacterId;
+          player.customCharacterVersionId = customCharacterVersionId;
           clearPlayerTimers(player);
           if (
             (room.roomKind === 'paid_private' || room.roomKind === 'paid_queue') &&
@@ -782,6 +789,7 @@ export const startServer = async () => {
           clientId,
           nickname: sanitizeNickname(nickname, 'Player 2'),
           characterId: safeCharacterId,
+          customCharacterVersionId,
           alive: true,
           connected: true,
           socketId: socket.id,
@@ -821,6 +829,7 @@ export const startServer = async () => {
         nickname,
         clientId,
         characterId,
+        customCharacterVersionId,
         accessToken,
         tokenId,
         entryFeeTierId,
@@ -911,6 +920,7 @@ export const startServer = async () => {
           clientId,
           nickname: sanitizeNickname(nickname, 'Player'),
           characterId: isCharacterId(characterId) ? characterId : DEFAULT_CHARACTER_ID,
+          customCharacterVersionId,
           walletPlayerId,
           tokenId,
           entryFeeTierId,
@@ -990,6 +1000,7 @@ export const startServer = async () => {
           clientId: queuedPlayer.clientId,
           nickname: queuedPlayer.nickname,
           characterId: queuedPlayer.characterId,
+          customCharacterVersionId: queuedPlayer.customCharacterVersionId,
           alive: true,
           connected: true,
           socketId: queuedPlayer.socketId,

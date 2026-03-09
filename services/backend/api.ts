@@ -1,4 +1,15 @@
 import type {
+  ActivateCustomCharacterResponse,
+  CharacterGenerationConfigResponse,
+  CharacterGenerationJobListResponse,
+  CharacterGenerationJobResponse,
+  CreateCharacterGenerationJobRequest,
+  CustomCharacterListResponse,
+  CustomCharacterVersionSummary,
+  RegisterExpoPushTokenRequest,
+  RenameCustomCharacterRequest,
+} from '../../shared/character-generation-contracts';
+import type {
   ConfirmPaymentIntentRequest,
   ConfirmPaymentIntentResponse,
   ContestEntryRequest,
@@ -240,6 +251,48 @@ export const backendApi = {
   getLedgerBalance: (accessToken: string) =>
     fetchJson<{ balances: WalletLedgerBalance[] }>('/ledger/balance', {
       headers: { Authorization: `Bearer ${accessToken}` },
+    }),
+  getCharacterGenerationConfig: () =>
+    fetchJson<CharacterGenerationConfigResponse>('/character-generation/config'),
+  createCharacterGenerationJob: (
+    accessToken: string,
+    payload: CreateCharacterGenerationJobRequest & { paymentIntentId?: string }
+  ) =>
+    fetchJson<CharacterGenerationJobResponse>('/character-generation/jobs', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(payload),
+    }),
+  getCharacterGenerationJobs: (accessToken: string) =>
+    fetchJson<CharacterGenerationJobListResponse>('/character-generation/jobs', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }),
+  getCharacterGenerationJob: (accessToken: string, jobId: string) =>
+    fetchJson<CharacterGenerationJobResponse>(`/character-generation/jobs/${jobId}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }),
+  getCustomCharacters: (accessToken: string) =>
+    fetchJson<CustomCharacterListResponse>('/custom-characters', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }),
+  renameCustomCharacter: (accessToken: string, characterId: string, payload: RenameCustomCharacterRequest) =>
+    fetchJson(`/custom-characters/${characterId}/rename`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(payload),
+    }),
+  activateCustomCharacter: (accessToken: string, characterId: string) =>
+    fetchJson<ActivateCustomCharacterResponse>(`/custom-characters/${characterId}/activate`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }),
+  getCustomCharacterVersion: (versionId: string) =>
+    fetchJson<{ version: CustomCharacterVersionSummary }>(`/custom-characters/versions/${versionId}`),
+  registerExpoPushToken: (accessToken: string, payload: RegisterExpoPushTokenRequest) =>
+    fetchJson('/notifications/expo-token', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(payload),
     }),
 };
 

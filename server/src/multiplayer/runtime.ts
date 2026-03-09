@@ -43,6 +43,7 @@ export interface QueueEntry {
   clientId: string;
   nickname: string;
   characterId: CharacterId;
+  customCharacterVersionId?: string;
   walletPlayerId: string;
   tokenId: string;
   entryFeeTierId: string;
@@ -74,6 +75,7 @@ export const snapshotRoom = (room: Room): RoomSnapshot => ({
     clientId: player.clientId,
     nickname: player.nickname,
     characterId: player.characterId,
+    customCharacterVersionId: player.customCharacterVersionId,
     alive: player.alive,
     connected: player.connected,
   })),
@@ -91,6 +93,7 @@ export const roomSummary = (room: Room) => ({
     playerId: player.playerId,
     nickname: player.nickname,
     characterId: player.characterId,
+    customCharacterVersionId: player.customCharacterVersionId,
     alive: player.alive,
     connected: player.connected,
   })),

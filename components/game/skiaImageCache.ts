@@ -2,31 +2,43 @@ import { useEffect, useState } from 'react';
 import { Asset } from 'expo-asset';
 import { Skia, type SkImage } from '@shopify/react-native-skia';
 
-const decodedImageCache = new Map<number, SkImage>();
-const decodePromiseCache = new Map<number, Promise<SkImage | null>>();
+type SkiaImageSource = number | string;
 
-async function decodeSkiaImage(source: number): Promise<SkImage | null> {
-  const asset = Asset.fromModule(source);
-  if (!asset.downloaded) {
-    await asset.downloadAsync();
+const getSourceCacheKey = (source: SkiaImageSource) =>
+  typeof source === 'number' ? `module:${source}` : `uri:${source}`;
+
+const decodedImageCache = new Map<string, SkImage>();
+const decodePromiseCache = new Map<string, Promise<SkImage | null>>();
+
+async function decodeSkiaImage(source: SkiaImageSource): Promise<SkImage | null> {
+  let uri: string;
+
+  if (typeof source === 'number') {
+    const asset = Asset.fromModule(source);
+    if (!asset.downloaded) {
+      await asset.downloadAsync();
+    }
+    uri = asset.localUri ?? asset.uri;
+  } else {
+    uri = source;
   }
 
-  const uri = asset.localUri ?? asset.uri;
   const data = await Skia.Data.fromURI(uri);
   const image = Skia.Image.MakeImageFromEncoded(data);
   if (image) {
-    decodedImageCache.set(source, image);
+    decodedImageCache.set(getSourceCacheKey(source), image);
   }
   return image;
 }
 
-function ensureSkiaImage(source: number): Promise<SkImage | null> {
-  const cachedImage = decodedImageCache.get(source);
+function ensureSkiaImage(source: SkiaImageSource): Promise<SkImage | null> {
+  const cacheKey = getSourceCacheKey(source);
+  const cachedImage = decodedImageCache.get(cacheKey);
   if (cachedImage) {
     return Promise.resolve(cachedImage);
   }
 
-  const pending = decodePromiseCache.get(source);
+  const pending = decodePromiseCache.get(cacheKey);
   if (pending) {
     return pending;
   }
@@ -37,21 +49,21 @@ function ensureSkiaImage(source: number): Promise<SkImage | null> {
       return null;
     })
     .finally(() => {
-      decodePromiseCache.delete(source);
+      decodePromiseCache.delete(cacheKey);
     });
 
-  decodePromiseCache.set(source, promise);
+  decodePromiseCache.set(cacheKey, promise);
   return promise;
 }
 
-export function preloadSkiaImages(sources: readonly number[]): Promise<void> {
+export function preloadSkiaImages(sources: readonly SkiaImageSource[]): Promise<void> {
   const uniqueSources = Array.from(new Set(sources));
   return Promise.all(uniqueSources.map((source) => ensureSkiaImage(source))).then(() => undefined);
 }
 
-export function useSkiaImageAsset(source: number | null | undefined): SkImage | null {
+export function useSkiaImageAsset(source: SkiaImageSource | null | undefined): SkImage | null {
   const [image, setImage] = useState<SkImage | null>(() =>
-    source == null ? null : decodedImageCache.get(source) ?? null
+    source == null ? null : decodedImageCache.get(getSourceCacheKey(source)) ?? null
   );
 
   useEffect(() => {
@@ -60,7 +72,7 @@ export function useSkiaImageAsset(source: number | null | undefined): SkImage | 
       return;
     }
 
-    const cachedImage = decodedImageCache.get(source) ?? null;
+    const cachedImage = decodedImageCache.get(getSourceCacheKey(source)) ?? null;
     setImage(cachedImage);
     if (cachedImage) {
       return;

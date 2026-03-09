@@ -33,7 +33,12 @@ const createWalletChallengeSchema = z.object({
 const createPaymentIntentSchema = z.object({
   tokenId: z.string().min(1),
   entryFeeTierId: z.string().min(1),
-  purpose: z.enum(['single_paid_contest', 'multi_paid_private', 'multi_paid_queue']),
+  purpose: z.enum([
+    'single_paid_contest',
+    'multi_paid_private',
+    'multi_paid_queue',
+    'character_generation',
+  ]),
   contestId: z.string().optional(),
 });
 
