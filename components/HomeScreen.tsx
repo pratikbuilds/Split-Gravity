@@ -16,6 +16,7 @@ type HomeScreenProps = {
   onSinglePlay: () => void;
   onMultiplay: () => void;
   onOpenCharacterSelect: () => void;
+  onOpenLeaderboard?: () => void;
   onOpenWalletDebug?: () => void;
 };
 
@@ -24,6 +25,7 @@ export const HomeScreen = ({
   onSinglePlay,
   onMultiplay,
   onOpenCharacterSelect,
+  onOpenLeaderboard,
   onOpenWalletDebug,
 }: HomeScreenProps) => {
   const insets = useSafeAreaInsets();
@@ -71,14 +73,22 @@ export const HomeScreen = ({
             </Text>
           </View>
 
-          {/* Characters button (secondary) */}
-          <View className="w-full self-center" style={{ marginTop: SECTION_GAP }}>
+          {/* Characters + Leaderboard buttons (secondary) */}
+          <View className="w-full self-center gap-3" style={{ marginTop: SECTION_GAP }}>
             <Pressable
               onPress={onOpenCharacterSelect}
               style={{ minHeight: BUTTON_MIN_HEIGHT }}
               className="rounded-full border border-white/20 bg-slate-900/70 px-6 py-3.5 active:opacity-80">
               <Text className="text-center text-base font-bold text-white">Characters</Text>
             </Pressable>
+            {onOpenLeaderboard ? (
+              <Pressable
+                onPress={onOpenLeaderboard}
+                style={{ minHeight: BUTTON_MIN_HEIGHT }}
+                className="rounded-full border border-amber-400/30 bg-slate-900/70 px-6 py-3.5 active:opacity-80">
+                <Text className="text-center text-base font-bold text-amber-200">Leaderboard</Text>
+              </Pressable>
+            ) : null}
           </View>
 
           <View

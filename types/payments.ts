@@ -8,6 +8,7 @@ import type {
 export type HomeScreenRoute =
   | 'home'
   | 'character_select'
+  | 'leaderboard'
   | 'single_mode_select'
   | 'single_paid_setup'
   | 'multi_mode_select'

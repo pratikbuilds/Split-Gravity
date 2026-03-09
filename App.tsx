@@ -17,6 +17,7 @@ import {
   getCharacterAssets,
 } from 'components/game/worldAssetSources';
 import { HomeScreen } from 'components/HomeScreen';
+import { LeaderboardScreen } from 'components/LeaderboardScreen';
 import { LobbyScreen } from 'components/multiplayer/LobbyScreen';
 import { SingleModeSelectScreen } from 'components/SingleModeSelectScreen';
 import { WalletDebugScreen } from 'components/wallet/WalletDebugScreen';
@@ -616,8 +617,13 @@ function AppContent() {
             onSinglePlay={openSingleModeSelect}
             onMultiplay={handleMultiplay}
             onOpenCharacterSelect={handleOpenCharacterSelect}
+            onOpenLeaderboard={() => setScreen('leaderboard')}
             onOpenWalletDebug={__DEV__ ? () => setScreen('wallet_debug') : undefined}
           />
+        ) : null}
+
+        {screen === 'leaderboard' ? (
+          <LeaderboardScreen onBack={handleReturnHome} />
         ) : null}
 
         {screen === 'character_select' ? (
