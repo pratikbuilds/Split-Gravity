@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Buffer } from 'buffer';
 import { Pressable, ScrollView, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMobileWallet } from '@wallet-ui/react-native-web3js';
 import { Transaction } from '@solana/web3.js';
 import type {
@@ -20,19 +21,24 @@ type PaidModeSetupScreenProps = {
   onComplete: (result: PaidSetupResult) => void;
 };
 
-const PURPOSE_COPY: Record<PaymentIntentPurpose, { title: string; description: string }> = {
+const PURPOSE_COPY: Record<
+  PaymentIntentPurpose,
+  { headline: string; subtitle: string; cta: string }
+> = {
   single_paid_contest: {
-    title: 'Daily Paid Contest',
-    description: 'Connect your wallet, pick the token and entry fee, then pay to lock in a run.',
+    headline: 'Daily Paid Contest',
+    subtitle: 'Connect your wallet, choose token and entry fee, then pay to enter. Your best distance today counts for the leaderboard.',
+    cta: 'Pay Entry Fee',
   },
   multi_paid_private: {
-    title: 'Paid Private Room',
-    description:
-      'Connect your wallet and preselect the stake so the room can enforce matching terms.',
+    headline: 'Paid Private Room',
+    subtitle: 'Connect your wallet and set the stake amount. Both players must fund the same stake before the match.',
+    cta: 'Connect & Set Stake',
   },
   multi_paid_queue: {
-    title: 'Paid Matchmaking',
-    description: 'Connect your wallet and fund a stake bucket before joining the public queue.',
+    headline: 'Paid Matchmaking',
+    subtitle: 'Connect your wallet and fund your stake, then join the queue to be matched with another paid player.',
+    cta: 'Connect & Fund Stake',
   },
 };
 
@@ -300,106 +306,102 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
     }
   };
 
+  const insets = useSafeAreaInsets();
+  const topPad = Math.max(insets.top + 16, 56);
+  const bottomPad = Math.max(insets.bottom, 24);
+
+  const flatTiers = tokens.flatMap((token) =>
+    token.entryFeeTiers.map((tier) => ({ token, tier }))
+  );
+
+  const ctaText = !walletAddress
+    ? 'Connect Wallet'
+    : submitting
+      ? 'Funding…'
+      : copy.cta;
+
   return (
     <View className="flex-1 bg-[#050816]">
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 64, paddingBottom: 32 }}>
-        <Text className="text-4xl font-black tracking-[3px] text-white">{copy.title}</Text>
-        <Text className="mt-3 max-w-sm text-sm leading-5 text-slate-300">{copy.description}</Text>
+        contentContainerStyle={{
+          paddingHorizontal: 20,
+          paddingTop: topPad,
+          paddingBottom: bottomPad,
+        }}
+        showsVerticalScrollIndicator={false}>
 
-        <View className="mt-8 rounded-[28px] border border-white/10 bg-slate-950/70 p-5">
-          <Text className="text-xs font-semibold uppercase tracking-[2px] text-slate-400">
-            Wallet
-          </Text>
-          <Text className="mt-2 text-base font-bold text-white">
-            {walletAddress ? shortenAddress(walletAddress) : 'Not connected'}
-          </Text>
-          <View className="mt-4 flex-row gap-3">
-            <Pressable
-              onPress={() => void connect()}
-              disabled={submitting}
-              className="flex-1 rounded-full bg-white px-4 py-3 active:opacity-80">
-              <Text className="text-center font-bold text-black">
-                {walletAddress ? 'Reconnect' : 'Connect Wallet'}
-              </Text>
-            </Pressable>
+        <View className="flex-row items-center justify-between mb-8">
+          <Pressable onPress={onBack} disabled={submitting} className="active:opacity-80">
+            <Text className="font-bold text-slate-400">← Back</Text>
+          </Pressable>
+          {walletAddress ? (
             <Pressable
               onPress={() => void disconnect()}
-              disabled={!walletAddress || submitting}
-              className={`flex-1 rounded-full px-4 py-3 active:opacity-80 ${
-                walletAddress && !submitting ? 'bg-slate-800' : 'bg-slate-900'
-              }`}>
-              <Text className="text-center font-bold text-white">Disconnect</Text>
+              disabled={submitting}
+              className="rounded-full bg-slate-900/80 px-3 py-1.5 active:opacity-80">
+              <Text className="text-xs font-bold text-slate-300">
+                {shortenAddress(walletAddress)} • Disconnect
+              </Text>
             </Pressable>
-          </View>
-        </View>
-
-        <View className="mt-6 rounded-[28px] border border-white/10 bg-slate-950/70 p-5">
-          <Text className="text-xs font-semibold uppercase tracking-[2px] text-slate-400">
-            Token
-          </Text>
-          <View className="mt-4 gap-3">
-            {tokens.map((token) => {
-              const isSelected = token.id === selectedTokenId;
-              return (
-                <Pressable
-                  key={token.id}
-                  onPress={() => setSelectedTokenId(token.id)}
-                  className={`rounded-2xl border px-4 py-4 active:opacity-80 ${
-                    isSelected
-                      ? 'border-cyan-300 bg-cyan-400/10'
-                      : 'border-white/10 bg-slate-900/80'
-                  }`}>
-                  <Text className="text-lg font-black text-white">{token.symbol}</Text>
-                  <Text className="mt-1 text-sm text-slate-300">{token.name}</Text>
-                </Pressable>
-              );
-            })}
-            {!loading && tokens.length === 0 ? (
-              <Text className="text-sm text-slate-400">No funded tokens are enabled yet.</Text>
-            ) : null}
-          </View>
-        </View>
-
-        <View className="mt-6 rounded-[28px] border border-white/10 bg-slate-950/70 p-5">
-          <Text className="text-xs font-semibold uppercase tracking-[2px] text-slate-400">
-            Entry Fee
-          </Text>
-          <View className="mt-4 gap-3">
-            {selectedToken?.entryFeeTiers.map((tier) => {
-              const isSelected = tier.id === selectedTierId;
-              return (
-                <Pressable
-                  key={tier.id}
-                  onPress={() => setSelectedTierId(tier.id)}
-                  className={`rounded-2xl border px-4 py-4 active:opacity-80 ${
-                    isSelected
-                      ? 'border-amber-300 bg-amber-400/10'
-                      : 'border-white/10 bg-slate-900/80'
-                  }`}>
-                  <Text className="text-lg font-black text-white">
-                    {tier.amount} {tier.currencySymbol}
-                  </Text>
-                  <Text className="mt-1 text-sm text-slate-300">{tier.label}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          {purpose === 'single_paid_contest' && !contestId && selectedToken && selectedTier ? (
-            <Text className="mt-4 text-sm text-amber-200">
-              No live contest is currently open for this token and entry fee tier.
-            </Text>
           ) : null}
         </View>
 
+        <Text className="text-4xl font-black tracking-[2px] text-white">
+          {copy.headline}
+        </Text>
+        <Text className="mt-3 max-w-sm text-base leading-6 text-slate-400">
+          {copy.subtitle}
+        </Text>
+
+        <View className="mt-10 gap-3">
+          {flatTiers.map(({ token, tier }) => {
+            const isSelected = token.id === selectedTokenId && tier.id === selectedTierId;
+            return (
+              <Pressable
+                key={`${token.id}-${tier.id}`}
+                onPress={() => {
+                  setSelectedTokenId(token.id);
+                  setSelectedTierId(tier.id);
+                }}
+                className={`flex-row items-center justify-between rounded-2xl border px-5 py-5 active:opacity-80 ${
+                  isSelected ? 'border-cyan-400/50 bg-cyan-500/10' : 'border-white/10 bg-slate-900/50'
+                }`}>
+                <View>
+                  <Text className={`text-xl font-black ${isSelected ? 'text-cyan-100' : 'text-white'}`}>
+                    {tier.amount} {token.symbol}
+                  </Text>
+                  {tier.label ? (
+                    <Text className="mt-1 text-sm text-slate-400">{tier.label}</Text>
+                  ) : null}
+                </View>
+                <View
+                  className={`h-6 w-6 items-center justify-center rounded-full border-2 ${
+                    isSelected ? 'border-cyan-400' : 'border-slate-600'
+                  }`}>
+                  {isSelected && <View className="h-3 w-3 rounded-full bg-cyan-400" />}
+                </View>
+              </Pressable>
+            );
+          })}
+          {!loading && flatTiers.length === 0 ? (
+            <Text className="mt-4 text-sm text-slate-500">No entry options available.</Text>
+          ) : null}
+        </View>
+
+        {purpose === 'single_paid_contest' && !contestId && selectedToken && selectedTier ? (
+          <Text className="mt-5 text-sm text-amber-300">
+            No live contest is currently open for this entry tier.
+          </Text>
+        ) : null}
+
         {error ? (
-          <View className="mt-6 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3">
-            <Text className="text-sm font-semibold leading-5 text-red-100">{error.summary}</Text>
+          <View className="mt-6 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3">
+            <Text className="text-sm font-semibold text-red-100">{error.summary}</Text>
             {error.details.length > 0 ? (
-              <View className="mt-3 gap-1 rounded-xl border border-red-200/10 bg-black/20 px-3 py-3">
+              <View className="mt-2 gap-1">
                 {error.details.map((detail, index) => (
-                  <Text key={`${detail}:${index}`} className="text-xs leading-5 text-red-50/90">
+                  <Text key={`${detail}:${index}`} className="text-xs text-red-200/90">
                     {detail}
                   </Text>
                 ))}
@@ -411,26 +413,19 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
         <Pressable
           onPress={() => void handlePrimaryAction()}
           disabled={loading || submitting || !selectedToken || !selectedTier || contestUnavailable}
-          className={`mt-8 rounded-full px-6 py-4 active:opacity-80 ${
+          className={`mt-10 rounded-full px-6 py-4 active:opacity-90 ${
             loading || submitting || !selectedToken || !selectedTier || contestUnavailable
-              ? 'bg-slate-700'
+              ? 'bg-slate-800'
               : 'bg-white'
           }`}>
           <Text
             className={`text-center text-lg font-black ${
               loading || submitting || !selectedToken || !selectedTier || contestUnavailable
-                ? 'text-slate-300'
+                ? 'text-slate-500'
                 : 'text-black'
             }`}>
-            {submitting ? 'Funding Entry…' : 'Connect and Pay Entry Fee'}
+            {ctaText}
           </Text>
-        </Pressable>
-
-        <Pressable
-          onPress={onBack}
-          disabled={submitting}
-          className="mt-4 self-start rounded-full border border-white/20 px-5 py-3 active:opacity-80">
-          <Text className="font-bold text-white">Back</Text>
         </Pressable>
       </ScrollView>
     </View>

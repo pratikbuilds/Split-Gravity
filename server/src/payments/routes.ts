@@ -116,7 +116,24 @@ export const registerPaymentRoutes = (app: AppLike) => {
   });
 
   app.get('/contests/:contestId/leaderboard', (request: RequestLike, response: ResponseLike) => {
-    response.json({ leaderboard: paymentService.getLeaderboard(request.params.contestId || '') });
+    const contestId = request.params.contestId || '';
+    const contests = paymentService.getDailyContests();
+    const contest = contests.find((c) => c.id === contestId);
+    const tokens = paymentService.getSupportedTokens();
+    const token = contest ? tokens.find((t) => t.id === contest.tokenId) : undefined;
+    const poolBase = paymentService.getContestPool(contestId);
+    const decimals = token?.decimals ?? 9;
+    const divisor = 10 ** decimals;
+    const poolNum = Number(poolBase) / divisor;
+    const poolTotalDisplay =
+      poolNum % 1 === 0 ? poolNum.toFixed(0) : poolNum.toFixed(4).replace(/\.?0+$/, '');
+    response.json({
+      leaderboard: paymentService.getLeaderboard(contestId),
+      poolTotalBaseUnits: poolBase.toString(),
+      poolTotalDisplay,
+      tokenSymbol: token?.symbol ?? '',
+      payoutBps: contest?.payoutBps ?? [],
+    });
   });
 
   app.post('/payments/intents', async (request: RequestLike, response: ResponseLike) => {

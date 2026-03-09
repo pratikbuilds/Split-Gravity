@@ -711,6 +711,18 @@ export class PaymentStore {
     };
   }
 
+  getContestPool(contestId: string): bigint {
+    const contest = this.getDailyContests().find((c) => c.id === contestId);
+    if (!contest) return 0n;
+    const contestEntries = [...this.contestEntriesByPaymentIntentId.values()].filter(
+      (entry) => entry.contestId === contestId
+    );
+    return contestEntries.reduce((sum, entry) => {
+      const intent = this.paymentIntents.get(entry.paymentIntentId);
+      return intent?.confirmedAt ? sum + BigInt(intent.amountBaseUnits) : sum;
+    }, 0n);
+  }
+
   getLeaderboard(contestId: string) {
     return applyRankings(this.leaderboardByContest.get(contestId) ?? []);
   }

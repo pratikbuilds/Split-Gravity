@@ -75,11 +75,23 @@ type LeaderboardScreenProps = {
   onBack: () => void;
 };
 
+const DECIMALS_DEFAULT = 9;
+
+function formatBaseUnitsToDisplay(baseUnits: string, decimals: number = DECIMALS_DEFAULT): string {
+  const n = Number(baseUnits) / 10 ** decimals;
+  if (n % 1 === 0) return n.toFixed(0);
+  return n.toFixed(4).replace(/\.?0+$/, '');
+}
+
 export const LeaderboardScreen = ({ onBack }: LeaderboardScreenProps) => {
   const insets = useSafeAreaInsets();
   const [contests, setContests] = useState<DailyContest[]>([]);
   const [selectedContestId, setSelectedContestId] = useState<string | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [poolTotalDisplay, setPoolTotalDisplay] = useState<string>('');
+  const [tokenSymbol, setTokenSymbol] = useState<string>('');
+  const [payoutBps, setPayoutBps] = useState<number[]>([]);
+  const [poolTotalBaseUnits, setPoolTotalBaseUnits] = useState<string>('0');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -92,8 +104,12 @@ export const LeaderboardScreen = ({ onBack }: LeaderboardScreenProps) => {
       if (data.length > 0) {
         const cid = data[0].id;
         setSelectedContestId(cid);
-        const { leaderboard: lb } = await backendApi.getLeaderboard(cid);
-        setLeaderboard(lb);
+        const res = await backendApi.getLeaderboard(cid);
+        setLeaderboard(res.leaderboard);
+        setPoolTotalDisplay(res.poolTotalDisplay);
+        setTokenSymbol(res.tokenSymbol);
+        setPayoutBps(res.payoutBps ?? []);
+        setPoolTotalBaseUnits(res.poolTotalBaseUnits ?? '0');
       }
     } catch (e) {
       const formatted = formatApiErrorForDebug(e);
@@ -124,10 +140,25 @@ export const LeaderboardScreen = ({ onBack }: LeaderboardScreenProps) => {
 
   const selectedContest = contests.find((c) => c.id === selectedContestId);
 
+  const getExpectedPayoutDisplay = useCallback(
+    (rank: number): string => {
+      const bps = payoutBps[rank - 1];
+      if (bps == null) return '—';
+      const poolBase = BigInt(poolTotalBaseUnits);
+      const payoutBase = (poolBase * BigInt(bps)) / 10_000n;
+      return `${formatBaseUnitsToDisplay(payoutBase.toString())} ${tokenSymbol}`.trim();
+    },
+    [payoutBps, poolTotalBaseUnits, tokenSymbol]
+  );
+
   const renderItem = useCallback(
     ({ item, index }: { item: LeaderboardEntry; index: number }) => {
       const style = getRankStyle(item.rank);
       const displayName = item.nickname?.trim() || maskWallet(item.walletAddress);
+      const payoutDisplay =
+        item.payoutAmount != null
+          ? `${formatBaseUnitsToDisplay(item.payoutAmount)} ${tokenSymbol}`.trim()
+          : getExpectedPayoutDisplay(item.rank);
       return (
         <View
           style={{
@@ -162,14 +193,19 @@ export const LeaderboardScreen = ({ onBack }: LeaderboardScreenProps) => {
                 {formatAchievedAt(item.achievedAt)}
               </Text>
             </View>
-            <Text style={{ fontSize: 18, fontWeight: '800', color: '#fbbf24' }}>
-              {item.bestDistance}m
-            </Text>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={{ fontSize: 18, fontWeight: '800', color: '#fbbf24' }}>
+                {item.bestDistance}m
+              </Text>
+              <Text style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
+                {payoutDisplay}
+              </Text>
+            </View>
           </View>
         </View>
       );
     },
-    [leaderboard.length]
+    [leaderboard.length, tokenSymbol, getExpectedPayoutDisplay]
   );
 
   const contentPadding = {
@@ -227,6 +263,19 @@ export const LeaderboardScreen = ({ onBack }: LeaderboardScreenProps) => {
         <Text className="text-5xl font-black tracking-[4px] text-white">Leaderboard</Text>
         {selectedContest && (
           <Text className="mt-2 text-sm text-slate-400">{selectedContest.title}</Text>
+        )}
+        {(poolTotalDisplay || tokenSymbol) && (
+          <View className="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-3">
+            <Text className="text-xs font-semibold uppercase tracking-wider text-amber-200/90">
+              Prize pool
+            </Text>
+            <Text className="mt-1 text-lg font-bold text-amber-100">
+              {poolTotalDisplay || '0'} {tokenSymbol}
+            </Text>
+            <Text className="mt-0.5 text-xs text-slate-400">
+              Payouts by rank shown below. Final amounts after contest ends.
+            </Text>
+          </View>
         )}
         {error && (
           <View className="mt-4 rounded-xl bg-red-900/30 border border-red-500/40 px-4 py-3">

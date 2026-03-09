@@ -1,8 +1,9 @@
 import React, { memo, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import { Atlas, Canvas, Group, rect, useImage, useRSXformBuffer } from '@shopify/react-native-skia';
+import { Atlas, Canvas, Group, rect, useRSXformBuffer } from '@shopify/react-native-skia';
 import type { CharacterId } from '../../shared/characters';
 import { getCharacterPresetOrDefault } from '../game/characterSpritePresets';
+import { useSkiaImageAsset } from '../game/skiaImageCache';
 
 type CharacterSpritePreviewProps = {
   characterId?: CharacterId;
@@ -19,7 +20,7 @@ export const CharacterSpritePreview = memo(
     backgroundColor = '#111827',
   }: CharacterSpritePreviewProps) => {
     const preset = getCharacterPresetOrDefault(characterId);
-    const image = useImage(preset.imageSource);
+    const image = useSkiaImageAsset(preset.imageSource);
     const idleFrames = preset.actions.idle;
     const [frameIndex, setFrameIndex] = useState(0);
 

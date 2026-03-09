@@ -19,6 +19,7 @@ import {
   type CharacterSpritePreset,
   type SpriteFrame,
 } from './characterSpritePresets';
+import { useSkiaImageAsset } from './skiaImageCache';
 import type { SimulationRefs } from './types';
 import { MIDDLE_PLATFORM_ASSETS, TERRAIN_TILE_ASSETS } from './worldAssetSources';
 
@@ -146,8 +147,8 @@ export const useWorldPictures = ({
   const characterPreset = getCharacterPresetOrDefault(characterId);
   const hasOpponentCharacter = opponentCharacterId != null;
   const opponentPreset = getCharacterPresetOrDefault(opponentCharacterId);
-  const characterImage = useImage(characterPreset.imageSource);
-  const opponentImage = useImage(hasOpponentCharacter ? opponentPreset.imageSource : null);
+  const characterImage = useSkiaImageAsset(characterPreset.imageSource);
+  const opponentImage = useSkiaImageAsset(hasOpponentCharacter ? opponentPreset.imageSource : null);
 
   const characterTransforms = useRSXformBuffer(1, (val) => {
     'worklet';

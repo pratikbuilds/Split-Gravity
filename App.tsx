@@ -17,6 +17,7 @@ import {
   GAME_ENVIRONMENT_ASSETS,
   getCharacterAssets,
 } from 'components/game/worldAssetSources';
+import { preloadSkiaImages } from 'components/game/skiaImageCache';
 import { HomeScreen } from 'components/HomeScreen';
 import { LeaderboardScreen } from 'components/LeaderboardScreen';
 import { LobbyScreen } from 'components/multiplayer/LobbyScreen';
@@ -214,7 +215,10 @@ function AppContent() {
     (characterIds: readonly (CharacterId | null | undefined)[]) => {
       const characterAssets = getCharacterAssets(characterIds);
       if (characterAssets.length === 0) return Promise.resolve();
-      return preloadAssets(characterAssets);
+      return Promise.all([
+        preloadAssets(characterAssets),
+        preloadSkiaImages(characterAssets),
+      ]).then(() => undefined);
     },
     [preloadAssets]
   );
@@ -273,6 +277,19 @@ function AppContent() {
   useEffect(() => {
     preloadCharacters([selectedCharacterId]);
   }, [preloadCharacters, selectedCharacterId]);
+
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => {
+      void Promise.all([
+        preloadAssets(CHARACTER_STARTUP_ASSETS),
+        preloadSkiaImages(CHARACTER_STARTUP_ASSETS),
+      ]);
+    });
+
+    return () => {
+      task.cancel();
+    };
+  }, [preloadAssets]);
 
   useEffect(() => {
     let active = true;
@@ -336,7 +353,10 @@ function AppContent() {
     if (screen !== 'character_select') return;
 
     const task = InteractionManager.runAfterInteractions(() => {
-      void preloadAssets(CHARACTER_STARTUP_ASSETS);
+      void Promise.all([
+        preloadAssets(CHARACTER_STARTUP_ASSETS),
+        preloadSkiaImages(CHARACTER_STARTUP_ASSETS),
+      ]);
     });
 
     return () => {
@@ -1001,7 +1021,7 @@ function AppContent() {
           </>
         ) : null}
 
-        {screen !== 'character_select' ? (
+        {screen === 'game' ? (
           <View pointerEvents="box-none" style={styles.audioControlWrapper}>
             <Pressable style={styles.audioToggleButton} onPress={handleToggleMute}>
               <Text style={styles.audioToggleText}>{isMuted ? 'SOUND OFF' : 'SOUND ON'}</Text>

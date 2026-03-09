@@ -196,6 +196,11 @@ export class PaymentService {
     return this.store.getDailyContests();
   }
 
+  getContestPool(contestId: string): bigint {
+    this.assertInitialized();
+    return this.store.getContestPool(contestId);
+  }
+
   getLeaderboard(contestId: string) {
     this.assertInitialized();
     return this.store.getLeaderboard(contestId);

@@ -230,7 +230,13 @@ export const backendApi = {
       body: JSON.stringify(payload),
     }),
   getLeaderboard: (contestId: string) =>
-    fetchJson<{ leaderboard: LeaderboardEntry[] }>(`/contests/${contestId}/leaderboard`),
+    fetchJson<{
+      leaderboard: LeaderboardEntry[];
+      poolTotalBaseUnits: string;
+      poolTotalDisplay: string;
+      tokenSymbol: string;
+      payoutBps: number[];
+    }>(`/contests/${contestId}/leaderboard`),
   getLedgerBalance: (accessToken: string) =>
     fetchJson<{ balances: WalletLedgerBalance[] }>('/ledger/balance', {
       headers: { Authorization: `Bearer ${accessToken}` },
