@@ -321,9 +321,12 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
       : copy.cta;
 
   return (
-    <View className="flex-1 bg-[#050816]">
+    <View style={styles.container}>
+      <View style={StyleSheet.absoluteFill} pointerEvents="none"><View style={styles.splitDiagonal} /></View>
+      
+
       <ScrollView
-        className="flex-1"
+        className="flex-1 z-10"
         contentContainerStyle={{
           paddingHorizontal: 20,
           paddingTop: topPad,
@@ -332,14 +335,14 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
         showsVerticalScrollIndicator={false}>
 
         <View className="flex-row items-center justify-between mb-8">
-          <Pressable onPress={onBack} disabled={submitting} className="active:opacity-80">
-            <Text className="font-bold text-slate-400">← Back</Text>
+          <Pressable onPress={onBack} disabled={submitting} className="active:opacity-80 px-4 py-2 bg-white/5 rounded-full border border-white/10">
+            <Text className="font-bold text-slate-300 uppercase tracking-wider text-xs">Back</Text>
           </Pressable>
           {walletAddress ? (
             <Pressable
               onPress={() => void disconnect()}
               disabled={submitting}
-              className="rounded-full bg-slate-900/80 px-3 py-1.5 active:opacity-80">
+              className="rounded-full bg-slate-900/80 px-4 py-2 border border-slate-700 active:opacity-80">
               <Text className="text-xs font-bold text-slate-300">
                 {shortenAddress(walletAddress)} • Disconnect
               </Text>
@@ -347,14 +350,17 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
           ) : null}
         </View>
 
-        <Text className="text-4xl font-black tracking-[2px] text-white">
-          {copy.headline}
+        <Text 
+          className="text-5xl font-black tracking-widest text-white italic"
+          style={{ textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 4 }, textShadowRadius: 10 }}
+        >
+          {copy.headline.toUpperCase()}
         </Text>
-        <Text className="mt-3 max-w-sm text-base leading-6 text-slate-400">
+        <Text className="mt-4 max-w-sm text-sm leading-6 text-slate-400">
           {copy.subtitle}
         </Text>
 
-        <View className="mt-10 gap-3">
+        <View className="mt-10 gap-4">
           {flatTiers.map(({ token, tier }) => {
             const isSelected = token.id === selectedTokenId && tier.id === selectedTierId;
             return (
@@ -364,45 +370,51 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
                   setSelectedTokenId(token.id);
                   setSelectedTierId(tier.id);
                 }}
-                className={`flex-row items-center justify-between rounded-2xl border px-5 py-5 active:opacity-80 ${
-                  isSelected ? 'border-cyan-400/50 bg-cyan-500/10' : 'border-white/10 bg-slate-900/50'
+                className={`flex-row items-center justify-between rounded-2xl border px-6 py-5 active:scale-[0.98] transition-all ${
+                  isSelected 
+                    ? 'bg-orange-500 border-orange-400 shadow-lg shadow-orange-500/30' 
+                    : 'border-white/5 bg-slate-900/50'
                 }`}>
                 <View>
-                  <Text className={`text-xl font-black ${isSelected ? 'text-cyan-100' : 'text-white'}`}>
-                    {tier.amount} {token.symbol}
+                  <Text className={`text-2xl font-black italic tracking-wide ${isSelected ? 'text-white' : 'text-slate-200'}`}>
+                    {tier.amount} <Text className={isSelected ? 'text-orange-200' : 'text-slate-400'}>{token.symbol}</Text>
                   </Text>
                   {tier.label ? (
-                    <Text className="mt-1 text-sm text-slate-400">{tier.label}</Text>
+                    <Text className={`mt-1 text-sm font-medium ${isSelected ? 'text-orange-100/80' : 'text-slate-500'}`}>{tier.label}</Text>
                   ) : null}
                 </View>
                 <View
                   className={`h-6 w-6 items-center justify-center rounded-full border-2 ${
-                    isSelected ? 'border-cyan-400' : 'border-slate-600'
+                    isSelected ? 'border-white bg-orange-400' : 'border-slate-600 bg-slate-800'
                   }`}>
-                  {isSelected && <View className="h-3 w-3 rounded-full bg-cyan-400" />}
+                  {isSelected && <View className="h-2.5 w-2.5 rounded-full bg-white" />}
                 </View>
               </Pressable>
             );
           })}
           {!loading && flatTiers.length === 0 ? (
-            <Text className="mt-4 text-sm text-slate-500">No entry options available.</Text>
+            <View className="bg-slate-900/50 border border-white/5 rounded-2xl p-6 items-center">
+              <Text className="text-sm font-medium text-slate-500 uppercase tracking-widest">No entry options available</Text>
+            </View>
           ) : null}
         </View>
 
         {purpose === 'single_paid_contest' && !contestId && selectedToken && selectedTier ? (
-          <Text className="mt-5 text-sm text-amber-300">
-            No live contest is currently open for this entry tier.
-          </Text>
+          <View className="mt-6 bg-red-950/50 border border-red-500/30 rounded-xl p-4">
+            <Text className="text-sm font-bold text-red-400">
+              No live contest is currently open for this entry tier.
+            </Text>
+          </View>
         ) : null}
 
         {error ? (
-          <View className="mt-6 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3">
-            <Text className="text-sm font-semibold text-red-100">{error.summary}</Text>
+          <View className="mt-6 rounded-xl border border-red-400/30 bg-red-500/10 px-5 py-4">
+            <Text className="text-sm font-bold text-red-300 uppercase tracking-wider mb-2">{error.summary}</Text>
             {error.details.length > 0 ? (
-              <View className="mt-2 gap-1">
+              <View className="gap-1.5">
                 {error.details.map((detail, index) => (
-                  <Text key={`${detail}:${index}`} className="text-xs text-red-200/90">
-                    {detail}
+                  <Text key={`${detail}:${index}`} className="text-xs font-medium text-red-200/80">
+                    • {detail}
                   </Text>
                 ))}
               </View>
@@ -413,13 +425,20 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
         <Pressable
           onPress={() => void handlePrimaryAction()}
           disabled={loading || submitting || !selectedToken || !selectedTier || contestUnavailable}
-          className={`mt-10 rounded-full px-6 py-4 active:opacity-90 ${
+          className={`mt-10 rounded-[28px] px-6 py-5 active:scale-95 transition-transform ${
             loading || submitting || !selectedToken || !selectedTier || contestUnavailable
               ? 'bg-slate-800'
               : 'bg-white'
-          }`}>
+          }`}
+          style={(!loading && !submitting && selectedToken && selectedTier && !contestUnavailable) ? {
+            shadowColor: '#ffffff',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.2,
+            shadowRadius: 8,
+            elevation: 5,
+          } : undefined}>
           <Text
-            className={`text-center text-lg font-black ${
+            className={`text-center text-xl font-black uppercase italic tracking-widest ${
               loading || submitting || !selectedToken || !selectedTier || contestUnavailable
                 ? 'text-slate-500'
                 : 'text-black'
@@ -431,3 +450,22 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
     </View>
   );
 };
+
+import { StyleSheet } from 'react-native';
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#0a0510',
+  },
+  splitDiagonal: {
+    position: 'absolute',
+    top: '45%',
+    left: '-50%',
+    width: '200%',
+    height: '150%',
+    backgroundColor: '#120803',
+    transform: [{ rotate: '-12deg' }],
+    borderTopWidth: 2,
+    borderTopColor: 'rgba(234, 88, 12, 0.2)',
+  },
+});
