@@ -72,12 +72,18 @@ const initialViewState: MultiplayerViewState = {
 const CREATE_ROOM_DEBUG_TIMEOUT_MS = 10_000;
 const MULTIPLAYER_DEBUG_PREFIX = '[multiplayer]';
 
+const viewStateKeys = Object.keys(initialViewState) as (keyof MultiplayerViewState)[];
+
+const areViewStatesEqual = (a: MultiplayerViewState, b: MultiplayerViewState) =>
+  viewStateKeys.every((key) => Object.is(a[key], b[key]));
+
 export class MultiplayerMatchController {
   private socket: MultiplayerSocket;
   private serverUrl: string;
-  private listeners = new Set<(state: MultiplayerViewState) => void>();
+  private listeners = new Set<() => void>();
   private opponentListeners = new Set<(snapshot: OpponentSnapshot | null) => void>();
   private state: MultiplayerViewState = initialViewState;
+  private stateVersion = 0;
   private clientId: string;
   private pendingCreate: RoomCreatePayload | null = null;
   private pendingJoin: RoomJoinPayload | null = null;
@@ -102,8 +108,7 @@ export class MultiplayerMatchController {
   }
 
   private emitState() {
-    const snapshot = this.getState();
-    this.listeners.forEach((listener) => listener(snapshot));
+    this.listeners.forEach((listener) => listener());
   }
 
   private emitOpponentSnapshot(snapshot: OpponentSnapshot | null) {
@@ -123,7 +128,12 @@ export class MultiplayerMatchController {
   }
 
   private setState(partial: Partial<MultiplayerViewState>) {
-    this.state = { ...this.state, ...partial };
+    const nextState = { ...this.state, ...partial };
+    if (areViewStatesEqual(this.state, nextState)) {
+      return;
+    }
+    this.state = nextState;
+    this.stateVersion += 1;
     this.emitState();
   }
 
@@ -155,8 +165,9 @@ export class MultiplayerMatchController {
         errorMessage: this.state.errorMessage,
       });
       this.setState({
+        pendingAction: 'none',
         errorMessage:
-          'Create room is still waiting on the multiplayer server. Check the console for [multiplayer] logs.',
+          'Create room timed out. Check that the server is reachable and try again.',
       });
     }, CREATE_ROOM_DEBUG_TIMEOUT_MS);
   }
@@ -375,6 +386,7 @@ export class MultiplayerMatchController {
           serverUrl: this.serverUrl,
           errorMessage: message,
         };
+        this.stateVersion += 1;
         this.emitState();
         this.emitOpponentSnapshot(null);
         return;
@@ -457,12 +469,15 @@ export class MultiplayerMatchController {
   }
 
   getState() {
-    return { ...this.state };
+    return this.state;
   }
 
-  subscribe(listener: (state: MultiplayerViewState) => void) {
+  getStateVersion() {
+    return this.stateVersion;
+  }
+
+  subscribe(listener: () => void) {
     this.listeners.add(listener);
-    listener(this.getState());
     return () => {
       this.listeners.delete(listener);
     };
@@ -768,6 +783,7 @@ export class MultiplayerMatchController {
       localReady: false,
       opponentReady: false,
     };
+    this.stateVersion += 1;
     this.lastSentState = null;
     this.lastStateSentAt = 0;
     this.emitState();

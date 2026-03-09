@@ -151,12 +151,17 @@ function AppContent() {
     multiplayerControllerRef.current = new MultiplayerMatchController();
   }
   const multiplayerController = multiplayerControllerRef.current;
-  const [multiplayerState, setMultiplayerState] = useState<MultiplayerViewState>(
-    multiplayerController.getState()
-  );
+
+  const [, forceMultiplayerUpdate] = useState(0);
+  useEffect(() => {
+    if (screen !== 'game') return;
+    return multiplayerController.subscribe(() => {
+      forceMultiplayerUpdate((n) => n + 1);
+    });
+  }, [multiplayerController, screen]);
+  const multiplayerState = multiplayerController.getState();
   const localPlayerId = multiplayerState.localPlayer?.playerId ?? null;
   const opponentPlayerId = multiplayerState.opponent?.playerId ?? null;
-  const hasMultiplayerPair = Boolean(localPlayerId && opponentPlayerId);
   const localStartsBottom =
     !mode.startsWith('multi_') || !localPlayerId || !opponentPlayerId
       ? true
@@ -318,9 +323,12 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
-    const unsubscribe = multiplayerController.subscribe((state) => {
-      setMultiplayerState(state);
-    });
+    if (screen === 'lobby' && mode.startsWith('multi_')) {
+      multiplayerController.connect();
+    }
+  }, [screen, mode, multiplayerController]);
+
+  useEffect(() => {
     const unsubscribeOpponent = multiplayerController.subscribeOpponentSnapshot((snapshot) => {
       opponentSnapshotValue.value = snapshot;
     });
@@ -332,7 +340,6 @@ function AppContent() {
     return () => {
       clearInterval(heartbeat);
       unsubscribeOpponent();
-      unsubscribe();
       multiplayerController.disconnect();
       opponentSnapshotValue.value = null;
     };
@@ -364,39 +371,6 @@ function AppContent() {
     };
   }, [preloadAssets, screen]);
 
-  useEffect(() => {
-    if (!mode.startsWith('multi_')) return;
-    if (multiplayerState.matchStatus !== 'running') return;
-    if (!hasMultiplayerPair) return;
-
-    setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
-    setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
-    setLocalMultiplayerDeathScore(null);
-    setGameOver(false);
-    setLastResult(null);
-    setLevelSeed(
-      multiplayerState.roomCode
-        ? hashStringToSeed(multiplayerState.roomCode)
-        : Math.floor(Math.random() * 0x7fffffff)
-    );
-    setGameKey((k) => k + 1);
-    setScreen('game');
-    void Promise.all([
-      preloadGameEnvironment(),
-      preloadCharacters([selectedCharacterId, multiplayerState.opponent?.characterId]),
-      ensureAudioReady(),
-    ]);
-  }, [
-    hasMultiplayerPair,
-    mode,
-    multiplayerState.matchStatus,
-    multiplayerState.opponent?.characterId,
-    multiplayerState.roomCode,
-    ensureAudioReady,
-    preloadGameEnvironment,
-    preloadCharacters,
-    selectedCharacterId,
-  ]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -609,6 +583,34 @@ function AppContent() {
   const handleLeavePaidQueue = useCallback(() => {
     multiplayerController.leavePaidQueue();
   }, [multiplayerController]);
+
+  const handleTransitionToGame = useCallback(() => {
+    const state = multiplayerController.getState();
+    if (!state.roomCode || !state.localPlayer || !state.opponent) return;
+    setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
+    setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
+    setLocalMultiplayerDeathScore(null);
+    setGameOver(false);
+    setLastResult(null);
+    setLevelSeed(
+      state.roomCode
+        ? hashStringToSeed(state.roomCode)
+        : Math.floor(Math.random() * 0x7fffffff)
+    );
+    setGameKey((k) => k + 1);
+    setScreen('game');
+    void Promise.all([
+      preloadGameEnvironment(),
+      preloadCharacters([selectedCharacterId, state.opponent.characterId]),
+      ensureAudioReady(),
+    ]);
+  }, [
+    multiplayerController,
+    preloadGameEnvironment,
+    preloadCharacters,
+    selectedCharacterId,
+    ensureAudioReady,
+  ]);
 
   const openSingleModeSelect = useCallback(() => {
     setScreen('single_mode_select');
@@ -892,15 +894,16 @@ function AppContent() {
 
         {screen === 'lobby' ? (
           <LobbyScreen
-            state={multiplayerState}
+            controller={multiplayerController}
+            mode={mode}
+            paidSession={pendingPaidSession}
             onBack={handleExitToHome}
             onCreateRoom={handleCreateRoom}
             onJoinRoom={handleJoinRoom}
             onJoinQueue={handleJoinPaidQueue}
             onLeaveQueue={handleLeavePaidQueue}
             onReady={handleReadyRoom}
-            mode={mode}
-            paidSession={pendingPaidSession}
+            onTransitionToGame={handleTransitionToGame}
           />
         ) : null}
 
