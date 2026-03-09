@@ -119,6 +119,13 @@ export interface ConfirmPaymentIntentResponse {
   transactionSignature: string;
 }
 
+export interface RefundPaymentIntentResponse {
+  paymentIntentId: string;
+  refundedAt: string;
+  ledgerTransactionId: string;
+  transactionSignature: string | null;
+}
+
 export interface ContestEntryRequest {
   paymentIntentId: string;
   nickname?: string;

@@ -43,8 +43,6 @@ type PaymentProgress = {
   accessToken?: string;
   paymentIntentId?: string;
   transactionSignature?: string;
-  contestEntryId?: string;
-  runSessionId?: string;
 };
 
 type ScreenError = {
@@ -280,37 +278,10 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
         })
       );
 
-      let contestEntryId: string | undefined;
-      let runSessionId: string | undefined;
-      if (purpose === 'single_paid_contest' && contestId) {
-        contestEntryId = currentProgress?.contestEntryId;
-        runSessionId = currentProgress?.runSessionId;
-        if (!contestEntryId || !runSessionId) {
-          const contestEntry = await runWithBackoff(() =>
-            backendApi.createContestEntry(accessToken!, contestId, {
-              paymentIntentId: paymentIntentId!,
-            })
-          );
-          contestEntryId = contestEntry.contestEntryId;
-          runSessionId = contestEntry.runSessionId;
-          setPaymentProgress((existing) => ({
-            ...(existing ?? { selectionKey }),
-            selectionKey,
-            accessToken,
-            paymentIntentId,
-            transactionSignature,
-            contestEntryId,
-            runSessionId,
-          }));
-        }
-      }
-
       onComplete({
         accessToken,
         paymentIntentId: paymentIntentId!,
         transactionSignature: transactionSignature!,
-        contestEntryId,
-        runSessionId,
         selection: {
           purpose,
           token: selectedToken,

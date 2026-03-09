@@ -241,6 +241,10 @@ export class PaymentStore {
     return this.paymentIntents.get(paymentIntentId) ?? null;
   }
 
+  getContestEntryByPaymentIntentId(paymentIntentId: string) {
+    return this.contestEntriesByPaymentIntentId.get(paymentIntentId) ?? null;
+  }
+
   createPaymentIntent(
     playerId: string,
     payload: {

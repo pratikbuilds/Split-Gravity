@@ -46,6 +46,61 @@ const createConfirmedRealtimeIntent = async (
   };
 };
 
+const createConfirmedContestIntent = async () => {
+  const store = new PaymentStore({ vaultPublicKey: Keypair.generate().publicKey.toBase58() });
+  const service = new PaymentService({ store });
+  const [contest] = service.getDailyContests();
+  const player = store.getOrCreatePlayer(`wallet-single-paid-${Math.random()}`);
+  const session = {
+    accessToken: 'contest-token',
+    playerId: player.id,
+    walletAddress: player.walletAddress,
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  };
+
+  (service as unknown as { sessions: Map<string, typeof session> }).sessions.set(
+    session.accessToken,
+    session
+  );
+
+  const paymentIntent = await service.createPaymentIntent(session.accessToken, {
+    tokenId: contest.tokenId,
+    entryFeeTierId: contest.entryFeeTierId,
+    purpose: 'single_paid_contest',
+    contestId: contest.id,
+  });
+  store.confirmPaymentIntent(player.id, paymentIntent.paymentIntentId, 'single-paid-sig');
+
+  return {
+    contest,
+    player,
+    service,
+    store,
+    session,
+    paymentIntentId: paymentIntent.paymentIntentId,
+  };
+};
+
+test('single-player contest intents can be refunded before contest entry creation', async () => {
+  const { service, store, session, paymentIntentId } = await createConfirmedContestIntent();
+
+  const refunded = await service.refundPaymentIntent(session.accessToken, paymentIntentId);
+
+  assert.equal(refunded.paymentIntentId, paymentIntentId);
+  assert.equal(store.getPaymentIntent(paymentIntentId)?.status, 'refunded');
+});
+
+test('single-player contest intents cannot be refunded after contest entry creation', async () => {
+  const { contest, service, session, paymentIntentId } = await createConfirmedContestIntent();
+
+  await service.createContestEntry(session.accessToken, contest.id, { paymentIntentId });
+
+  await assert.rejects(
+    service.refundPaymentIntent(session.accessToken, paymentIntentId),
+    /can no longer be refunded/
+  );
+});
+
 test('realtime refund does not mutate ledger state when vault transfer fails', async () => {
   const { player, service, store, paymentIntentId } = await createConfirmedRealtimeIntent(
     'multi_paid_private',

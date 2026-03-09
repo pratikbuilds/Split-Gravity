@@ -278,6 +278,44 @@ export class PaymentService {
     return confirmed;
   }
 
+  async refundPaymentIntent(accessToken: string | undefined, paymentIntentId: string) {
+    await this.ensureInitialized();
+    const session = this.requireSession(accessToken);
+    const intent = this.store.getPaymentIntent(paymentIntentId);
+    if (!intent || intent.playerId !== session.playerId) {
+      throw new Error('Payment intent not found.');
+    }
+
+    if (
+      intent.purpose === 'single_paid_contest' &&
+      this.store.getContestEntryByPaymentIntentId(paymentIntentId)
+    ) {
+      throw new Error('This paid run has already started and can no longer be refunded.');
+    }
+
+    if (!this.connection || !this.vaultSigner) {
+      const refund = this.store.refundPaymentIntent(session.playerId, paymentIntentId, {
+        description: 'Refunded before gameplay started',
+      });
+      await this.persistPaymentState();
+      return refund;
+    }
+
+    const transfer = await sendVaultTransfer({
+      connection: this.connection,
+      vaultSigner: this.vaultSigner,
+      destinationAddress: session.walletAddress,
+      amountLamports: BigInt(intent.amountBaseUnits),
+      memo: `runner:refund:${paymentIntentId}`,
+    });
+    const refund = this.store.refundPaymentIntent(session.playerId, paymentIntentId, {
+      description: 'Refunded before gameplay started',
+      externalTransferSignature: transfer.transactionSignature,
+    });
+    await this.persistPaymentState();
+    return refund;
+  }
+
   async createContestEntry(
     accessToken: string | undefined,
     contestId: string,

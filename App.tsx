@@ -11,6 +11,7 @@ import { CharacterSelectScreen } from 'components/CharacterSelectScreen';
 import { GameCanvas } from 'components/GameCanvas';
 import { MultiplayerModeSelectScreen } from 'components/MultiplayerModeSelectScreen';
 import { PaidModeSetupScreen } from 'components/PaidModeSetupScreen';
+import { PostPaymentSuccessScreen } from 'components/PostPaymentSuccessScreen';
 import {
   CHARACTER_STARTUP_ASSETS,
   GAME_ENVIRONMENT_ASSETS,
@@ -34,6 +35,7 @@ import type {
 import type {
   HomeScreenRoute,
   MultiplayerMenuMode,
+  PostPaymentHandoff,
   PaidSetupResult,
   SinglePlayerMenuMode,
 } from './types/payments';
@@ -64,6 +66,55 @@ function getRandomTerrainTheme(previousTheme?: TerrainTheme): TerrainTheme {
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const buildPostPaymentHandoff = (result: PaidSetupResult): PostPaymentHandoff => {
+  switch (result.selection.purpose) {
+    case 'single_paid_contest':
+      return {
+        kind: 'single_paid_contest',
+        eyebrow: 'Payment Received',
+        title: 'Your Run Is Locked In',
+        subtitle:
+          result.selection.contest?.title
+            ? `${result.selection.contest.title} is ready for you. Take a breath, then launch when you are ready.`
+            : 'Your paid contest entry is secured. Take a breath, then launch when you are ready.',
+        primaryActionLabel: 'Start Run',
+        primaryHelperText:
+          'We will open your contest run only after you tap start. Until then, this entry stays refundable.',
+        refundLabel: 'Refund Entry',
+        refundHelperText: 'Back out before the run begins and your funded entry will be returned.',
+      };
+    case 'multi_paid_private':
+      return {
+        kind: 'multi_paid_private',
+        eyebrow: 'Stake Secured',
+        title: 'You Are Funded For A Duel',
+        subtitle:
+          'Your private match stake is confirmed. Head into the lobby when you are ready to create or join a room.',
+        primaryActionLabel: 'Enter Lobby',
+        primaryHelperText:
+          'Next you will choose your room flow and ready up once both players are funded.',
+        refundLabel: 'Refund Stake',
+        refundHelperText: 'If the duel is off, back out now and reclaim the entry before the match starts.',
+      };
+    case 'multi_paid_queue':
+      return {
+        kind: 'multi_paid_queue',
+        eyebrow: 'Queue Ticket Secured',
+        title: 'You Are Ready For Matchmaking',
+        subtitle:
+          'Your public matchmaking stake is confirmed. Continue when you are ready to set your nickname and join the live queue.',
+        primaryActionLabel: 'Continue To Matchmaking',
+        primaryHelperText:
+          'The next screen will take you into the queue flow so you can join a funded match with confidence.',
+        refundLabel: 'Refund Stake',
+        refundHelperText: 'Need to step away? Refund now before you enter matchmaking.',
+      };
+  }
+};
+
+const getErrorMessage = (error: unknown, fallback: string) =>
+  error instanceof Error ? error.message : fallback;
+
 function AppContent() {
   const [screen, setScreen] = useState<HomeScreenRoute>('home');
   const [mode, setMode] = useState<GameMode>('single_practice');
@@ -77,6 +128,10 @@ function AppContent() {
   const [audioReady, setAudioReady] = useState(false);
   const [localMultiplayerDeathScore, setLocalMultiplayerDeathScore] = useState<number | null>(null);
   const [pendingPaidSession, setPendingPaidSession] = useState<PaidSetupResult | null>(null);
+  const [postPaymentHandoff, setPostPaymentHandoff] = useState<PostPaymentHandoff | null>(null);
+  const [postPaymentActionPending, setPostPaymentActionPending] = useState(false);
+  const [postPaymentRefundPending, setPostPaymentRefundPending] = useState(false);
+  const [postPaymentError, setPostPaymentError] = useState<string | null>(null);
   const [paidRunSubmissionPending, setPaidRunSubmissionPending] = useState(false);
   const [paidRunSubmissionError, setPaidRunSubmissionError] = useState<string | null>(null);
 
@@ -404,6 +459,10 @@ function AppContent() {
     setGameOver(false);
     setLastResult(null);
     setPendingPaidSession(null);
+    setPostPaymentHandoff(null);
+    setPostPaymentActionPending(false);
+    setPostPaymentRefundPending(false);
+    setPostPaymentError(null);
     setPaidRunSubmissionPending(false);
     setPaidRunSubmissionError(null);
     setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
@@ -439,6 +498,10 @@ function AppContent() {
     setGameOver(false);
     setLastResult(null);
     setLocalMultiplayerDeathScore(null);
+    setPostPaymentHandoff(null);
+    setPostPaymentActionPending(false);
+    setPostPaymentRefundPending(false);
+    setPostPaymentError(null);
     setPaidRunSubmissionPending(false);
     setPaidRunSubmissionError(null);
     if (mode.startsWith('multi_')) {
@@ -522,6 +585,10 @@ function AppContent() {
       if (nextMode === 'casual_room') {
         setMode('multi_casual');
         setPendingPaidSession(null);
+        setPostPaymentHandoff(null);
+        setPostPaymentActionPending(false);
+        setPostPaymentRefundPending(false);
+        setPostPaymentError(null);
         setGameOver(false);
         setLastResult(null);
         setLocalMultiplayerDeathScore(null);
@@ -539,6 +606,10 @@ function AppContent() {
   const handlePaidSetupComplete = useCallback(
     (result: PaidSetupResult) => {
       setPendingPaidSession(result);
+      setPostPaymentHandoff(buildPostPaymentHandoff(result));
+      setPostPaymentActionPending(false);
+      setPostPaymentRefundPending(false);
+      setPostPaymentError(null);
       setGameOver(false);
       setLastResult(null);
       setLocalMultiplayerDeathScore(null);
@@ -549,16 +620,13 @@ function AppContent() {
         preloadGameEnvironment();
         preloadCharacters([selectedCharacterId]);
         void ensureAudioReady();
-        setMode('single_paid_contest');
-        setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
-        setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
-        setGameKey((k) => k + 1);
-        setScreen('game');
-        return;
       }
 
-      multiplayerController.resetLobbyState();
-      setScreen('lobby');
+      if (result.selection.purpose !== 'single_paid_contest') {
+        multiplayerController.resetLobbyState();
+      }
+
+      setScreen('post_payment');
     },
     [
       ensureAudioReady,
@@ -568,6 +636,104 @@ function AppContent() {
       selectedCharacterId,
     ]
   );
+
+  const handlePostPaymentPrimaryAction = useCallback(async () => {
+    if (!pendingPaidSession || !postPaymentHandoff) return;
+
+    setPostPaymentActionPending(true);
+    setPostPaymentError(null);
+
+    try {
+      if (postPaymentHandoff.kind === 'single_paid_contest') {
+        let nextSession = pendingPaidSession;
+        if (!nextSession.runSessionId) {
+          const contestId = nextSession.selection.contest?.id;
+          if (!contestId) {
+            throw new Error('No active contest is attached to this paid run.');
+          }
+
+          const contestEntry = await backendApi.createContestEntry(
+            nextSession.accessToken,
+            contestId,
+            {
+              paymentIntentId: nextSession.paymentIntentId,
+            }
+          );
+
+          nextSession = {
+            ...nextSession,
+            contestEntryId: contestEntry.contestEntryId,
+            runSessionId: contestEntry.runSessionId,
+          };
+          setPendingPaidSession(nextSession);
+        }
+
+        preloadGameEnvironment();
+        preloadCharacters([selectedCharacterId]);
+        await ensureAudioReady();
+        setMode('single_paid_contest');
+        setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
+        setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
+        setGameOver(false);
+        setLastResult(null);
+        setPostPaymentHandoff(null);
+        setGameKey((k) => k + 1);
+        setScreen('game');
+        return;
+      }
+
+      multiplayerController.resetLobbyState();
+      setPostPaymentHandoff(null);
+      setScreen('lobby');
+    } catch (error) {
+      setPostPaymentError(getErrorMessage(error, 'Unable to continue from payment confirmation.'));
+    } finally {
+      setPostPaymentActionPending(false);
+    }
+  }, [
+    ensureAudioReady,
+    multiplayerController,
+    pendingPaidSession,
+    postPaymentHandoff,
+    preloadCharacters,
+    preloadGameEnvironment,
+    selectedCharacterId,
+  ]);
+
+  const handleRefundPaidEntry = useCallback(async () => {
+    if (!pendingPaidSession) return;
+
+    setPostPaymentRefundPending(true);
+    setPostPaymentError(null);
+
+    try {
+      await backendApi.refundPaymentIntent(
+        pendingPaidSession.accessToken,
+        pendingPaidSession.paymentIntentId
+      );
+      multiplayerController.resetLobbyState();
+      setGameOver(false);
+      setLastResult(null);
+      setLocalMultiplayerDeathScore(null);
+      setPendingPaidSession(null);
+      setPostPaymentHandoff(null);
+      setPostPaymentActionPending(false);
+      setPostPaymentRefundPending(false);
+      setPaidRunSubmissionPending(false);
+      setPaidRunSubmissionError(null);
+
+      if (pendingPaidSession.selection.purpose === 'single_paid_contest') {
+        setMode('single_practice');
+        setScreen('single_mode_select');
+        return;
+      }
+
+      setScreen('multi_mode_select');
+    } catch (error) {
+      setPostPaymentError(getErrorMessage(error, 'Refund failed. Please try again.'));
+      setPostPaymentRefundPending(false);
+    }
+  }, [multiplayerController, pendingPaidSession]);
 
   const handleFlipInput = useCallback(() => {
     multiplayerController.sendInput('flip');
@@ -654,6 +820,18 @@ function AppContent() {
             purpose={mode === 'multi_paid_queue' ? 'multi_paid_queue' : 'multi_paid_private'}
             onBack={() => setScreen('multi_mode_select')}
             onComplete={handlePaidSetupComplete}
+          />
+        ) : null}
+
+        {screen === 'post_payment' && pendingPaidSession && postPaymentHandoff ? (
+          <PostPaymentSuccessScreen
+            handoff={postPaymentHandoff}
+            session={pendingPaidSession}
+            primaryPending={postPaymentActionPending}
+            refundPending={postPaymentRefundPending}
+            errorMessage={postPaymentError}
+            onPrimaryAction={() => void handlePostPaymentPrimaryAction()}
+            onRefund={() => void handleRefundPaidEntry()}
           />
         ) : null}
 
