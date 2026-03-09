@@ -1,4 +1,4 @@
-import type { MatchState, MatchStatePacket } from '../../shared/multiplayer-contracts';
+import type { MatchState, MatchStatePacket } from './shared/multiplayer-contracts';
 
 export const MAX_CLIENT_ID_LENGTH = 128;
 export const MAX_NICKNAME_LENGTH = 24;

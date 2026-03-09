@@ -136,7 +136,9 @@ function isValidSectionPlatform(platform: SectionPlatform, sectionWidthTiles: nu
 function isValidSection(section: LevelSection): boolean {
   if (!isPositiveFinite(section.widthTiles)) return false;
   if (!Array.isArray(section.platforms) || section.platforms.length === 0) return false;
-  return section.platforms.every((platform) => isValidSectionPlatform(platform, section.widthTiles));
+  return section.platforms.every((platform) =>
+    isValidSectionPlatform(platform, section.widthTiles)
+  );
 }
 
 function getValidatedSections(): LevelSection[] {

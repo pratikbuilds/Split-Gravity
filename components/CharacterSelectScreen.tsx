@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import type { CharacterId } from '../shared/characters';
 import { CharacterSpritePreview } from './character/CharacterSpritePreview';
@@ -19,7 +20,12 @@ export const CharacterSelectScreen = ({
   onBack,
   onConfirm,
 }: CharacterSelectScreenProps) => {
+  const insets = useSafeAreaInsets();
   const [pendingCharacterId, setPendingCharacterId] = useState<CharacterId>(selectedCharacterId);
+
+  const handleBack = useCallback(() => {
+    onBack();
+  }, [onBack]);
 
   useEffect(() => {
     void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
@@ -32,11 +38,17 @@ export const CharacterSelectScreen = ({
   const pendingCharacter = getCharacterDefinitionOrDefault(pendingCharacterId);
 
   return (
-    <View className="flex-1 bg-[#040712] px-6 pb-10 pt-8">
-      <View className="z-10 flex-row items-center justify-between">
+    <View
+      className="flex-1 bg-[#040712] px-6 pb-10 pt-8"
+      style={{ paddingTop: Math.max(insets.top, 32) }}>
+      <View
+        className="z-10 flex-row items-center justify-between"
+        pointerEvents="box-none"
+        style={{ minHeight: 44 }}>
         <Pressable
-          onPress={onBack}
-          hitSlop={12}
+          onPress={handleBack}
+          hitSlop={16}
+          style={{ zIndex: 1 }}
           className="rounded-full border border-white/15 px-4 py-2">
           <Text className="text-sm font-semibold text-slate-200">Back</Text>
         </Pressable>

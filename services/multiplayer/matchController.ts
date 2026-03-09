@@ -1,14 +1,16 @@
 import type {
+  MatchRoomKind,
   MatchResult,
   MatchStatePacket,
   PlayerSession,
+  QueueJoinPayload,
   RoomCreatePayload,
   RoomJoinPayload,
   RoomSnapshot,
 } from '../../shared/multiplayer-contracts';
 import type { CharacterId } from '../../shared/characters';
-import { NativeModules, Platform } from 'react-native';
 import type { MatchStatus, MultiplayerResult, OpponentSnapshot } from '../../types/game';
+import { resolveConfiguredBackendUrl } from '../backend/config';
 import { createMultiplayerSocket, type MultiplayerSocket } from './socketClient';
 
 export type MultiplayerViewState = {
@@ -24,9 +26,22 @@ export type MultiplayerViewState = {
   multiplayerResult: MultiplayerResult | null;
   errorMessage: string | null;
   serverUrl: string;
-  pendingAction: 'none' | 'creating_room' | 'joining_room' | 'readying';
+  pendingAction:
+    | 'none'
+    | 'creating_room'
+    | 'joining_room'
+    | 'readying'
+    | 'queueing'
+    | 'leaving_queue';
   localReady: boolean;
   opponentReady: boolean;
+  roomKind: MatchRoomKind;
+  tokenId: string | null;
+  entryFeeTierId: string | null;
+  localFunded: boolean;
+  opponentFunded: boolean;
+  queueStatus: 'idle' | 'queued' | 'matched';
+  queueEntryId: string | null;
 };
 
 const initialViewState: MultiplayerViewState = {
@@ -45,36 +60,13 @@ const initialViewState: MultiplayerViewState = {
   pendingAction: 'none',
   localReady: false,
   opponentReady: false,
-};
-
-const FALLBACK_SERVER_PORT = 4100;
-const DEFAULT_MULTIPLAYER_SERVER_URL = 'https://multiplayer-server-production-839e.up.railway.app';
-
-const resolveConfiguredServerUrl = () => {
-  const configuredUrl = process.env.EXPO_PUBLIC_MULTIPLAYER_URL?.trim();
-  if (configuredUrl) return configuredUrl;
-  return DEFAULT_MULTIPLAYER_SERVER_URL || resolveDefaultServerUrl();
-};
-
-const resolveDefaultServerUrl = () => {
-  const sourceUrl: string | undefined = NativeModules?.SourceCode?.scriptURL;
-  if (sourceUrl) {
-    try {
-      const parsed = new URL(sourceUrl);
-      if (parsed.hostname) {
-        return `http://${parsed.hostname}:${FALLBACK_SERVER_PORT}`;
-      }
-    } catch {
-      // Ignore parse errors and fallback below.
-    }
-  }
-
-  if (Platform.OS === 'android') {
-    // Android emulator loopback to host machine.
-    return `http://10.0.2.2:${FALLBACK_SERVER_PORT}`;
-  }
-
-  return `http://localhost:${FALLBACK_SERVER_PORT}`;
+  roomKind: 'casual',
+  tokenId: null,
+  entryFeeTierId: null,
+  localFunded: false,
+  opponentFunded: false,
+  queueStatus: 'idle',
+  queueEntryId: null,
 };
 
 export class MultiplayerMatchController {
@@ -86,12 +78,13 @@ export class MultiplayerMatchController {
   private clientId: string;
   private pendingCreate: RoomCreatePayload | null = null;
   private pendingJoin: RoomJoinPayload | null = null;
+  private pendingQueueJoin: QueueJoinPayload | null = null;
   private lastStateSentAt = 0;
   private lastSentState: Omit<MatchStatePacket, 't'> | null = null;
   private countdownTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionallyDisconnecting = false;
 
-  constructor(serverUrl = resolveConfiguredServerUrl()) {
+  constructor(serverUrl = resolveConfiguredBackendUrl()) {
     this.serverUrl = serverUrl;
     this.socket = createMultiplayerSocket(serverUrl);
     this.clientId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
@@ -121,6 +114,11 @@ export class MultiplayerMatchController {
     this.socket.emit('room:leave', { roomCode: this.state.roomCode });
   }
 
+  private leaveQueueIfNeeded() {
+    if (!this.socket.connected || !this.state.queueEntryId) return;
+    this.socket.emit('queue:leave', { queueEntryId: this.state.queueEntryId });
+  }
+
   private registerSocketHandlers() {
     this.socket.on('connect', () => {
       this.intentionallyDisconnecting = false;
@@ -138,9 +136,13 @@ export class MultiplayerMatchController {
         this.socket.emit('room:join', this.pendingJoin);
         this.pendingJoin = null;
       }
+      if (this.pendingQueueJoin) {
+        this.socket.emit('queue:join', this.pendingQueueJoin);
+      }
       if (
         !this.pendingCreate &&
         !this.pendingJoin &&
+        !this.pendingQueueJoin &&
         this.state.roomCode &&
         this.state.localPlayer
       ) {
@@ -179,7 +181,7 @@ export class MultiplayerMatchController {
       });
     });
 
-    this.socket.on('room:created', ({ roomCode, player }) => {
+    this.socket.on('room:created', ({ roomCode, player, roomKind }) => {
       this.setState({
         roomCode,
         localPlayer: player,
@@ -187,6 +189,9 @@ export class MultiplayerMatchController {
         multiplayerResult: null,
         pendingAction: 'none',
         errorMessage: null,
+        roomKind: roomKind ?? this.state.roomKind,
+        queueStatus: roomKind === 'paid_queue' ? 'matched' : 'idle',
+        queueEntryId: null,
       });
     });
 
@@ -265,7 +270,35 @@ export class MultiplayerMatchController {
       });
     });
 
-    this.socket.on('error', ({ message }) => {
+    this.socket.on('queue:state', ({ status, queueEntryId, tokenId, entryFeeTierId, message }) => {
+      this.pendingQueueJoin = null;
+      this.setState({
+        pendingAction: 'none',
+        queueStatus: status,
+        queueEntryId: queueEntryId ?? null,
+        tokenId: tokenId ?? this.state.tokenId,
+        entryFeeTierId: entryFeeTierId ?? this.state.entryFeeTierId,
+        errorMessage: message ?? null,
+      });
+    });
+
+    this.socket.on('error', ({ code, message }) => {
+      if (code === 'PAID_ROOM_CANCELLED' || code === 'PAID_ROOM_EXPIRED') {
+        this.clearCountdownTimer();
+        this.pendingCreate = null;
+        this.pendingJoin = null;
+        this.pendingQueueJoin = null;
+        this.state = {
+          ...initialViewState,
+          connected: this.socket.connected,
+          serverUrl: this.serverUrl,
+          errorMessage: message,
+        };
+        this.emitState();
+        this.emitOpponentSnapshot(null);
+        return;
+      }
+
       this.setState({ errorMessage: message, pendingAction: 'none' });
     });
   }
@@ -313,6 +346,9 @@ export class MultiplayerMatchController {
 
     this.setState({
       roomCode: room.roomCode,
+      roomKind: room.roomKind ?? 'casual',
+      tokenId: room.tokenId ?? null,
+      entryFeeTierId: room.entryFeeTierId ?? null,
       localPlayer,
       opponent,
       matchStatus: status,
@@ -320,6 +356,12 @@ export class MultiplayerMatchController {
       pendingAction: 'none',
       localReady: localPlayer ? room.readyPlayerIds.includes(localPlayer.playerId) : false,
       opponentReady: opponent ? room.readyPlayerIds.includes(opponent.playerId) : false,
+      localFunded: localPlayer
+        ? Boolean(room.fundedPlayerIds?.includes(localPlayer.playerId))
+        : false,
+      opponentFunded: opponent ? Boolean(room.fundedPlayerIds?.includes(opponent.playerId)) : false,
+      queueStatus: room.roomKind === 'paid_queue' ? 'matched' : this.state.queueStatus,
+      queueEntryId: room.roomKind === 'paid_queue' ? null : this.state.queueEntryId,
       opponentSnapshot: status === 'running' ? this.state.opponentSnapshot : null,
       reconnectSecondsRemaining: clearReconnect ? null : this.state.reconnectSecondsRemaining,
       connectionState: nextConnectionState,
@@ -357,21 +399,40 @@ export class MultiplayerMatchController {
     this.clearCountdownTimer();
     this.pendingCreate = null;
     this.pendingJoin = null;
+    this.pendingQueueJoin = null;
+    this.leaveQueueIfNeeded();
     this.leaveRoomIfNeeded();
     if (!this.socket.connected) return;
     this.intentionallyDisconnecting = true;
     this.socket.disconnect();
   }
 
-  createRoom(nickname: string, characterId: CharacterId) {
+  createRoom(
+    nickname: string,
+    characterId: CharacterId,
+    options?: {
+      accessToken?: string;
+      roomKind?: MatchRoomKind;
+      tokenId?: string;
+      entryFeeTierId?: string;
+      paymentIntentId?: string;
+    }
+  ) {
     const safeNickname = nickname.trim() || 'Player 1';
     const payload = {
       nickname: safeNickname,
       clientId: this.clientId,
       characterId,
+      accessToken: options?.accessToken,
+      roomKind: options?.roomKind,
+      tokenId: options?.tokenId,
+      entryFeeTierId: options?.entryFeeTierId,
+      paymentIntentId: options?.paymentIntentId,
     };
     this.pendingJoin = null;
+    this.pendingQueueJoin = null;
     this.pendingCreate = payload;
+    this.leaveQueueIfNeeded();
     this.leaveRoomIfNeeded();
     this.setState({
       errorMessage: null,
@@ -385,6 +446,13 @@ export class MultiplayerMatchController {
       multiplayerResult: null,
       reconnectSecondsRemaining: null,
       opponentSnapshot: null,
+      roomKind: options?.roomKind ?? 'casual',
+      tokenId: options?.tokenId ?? null,
+      entryFeeTierId: options?.entryFeeTierId ?? null,
+      localFunded: Boolean(options?.paymentIntentId),
+      opponentFunded: false,
+      queueStatus: 'idle',
+      queueEntryId: null,
     });
     this.emitOpponentSnapshot(null);
     this.connect();
@@ -394,7 +462,18 @@ export class MultiplayerMatchController {
     }
   }
 
-  joinRoom(roomCode: string, nickname: string, characterId: CharacterId) {
+  joinRoom(
+    roomCode: string,
+    nickname: string,
+    characterId: CharacterId,
+    options?: {
+      accessToken?: string;
+      roomKind?: MatchRoomKind;
+      tokenId?: string;
+      entryFeeTierId?: string;
+      paymentIntentId?: string;
+    }
+  ) {
     const safeNickname = nickname.trim() || 'Player';
     const normalizedCode = roomCode.trim().toUpperCase();
     const payload = {
@@ -402,9 +481,16 @@ export class MultiplayerMatchController {
       nickname: safeNickname,
       clientId: this.clientId,
       characterId,
+      accessToken: options?.accessToken,
+      roomKind: options?.roomKind,
+      tokenId: options?.tokenId,
+      entryFeeTierId: options?.entryFeeTierId,
+      paymentIntentId: options?.paymentIntentId,
     };
     this.pendingCreate = null;
+    this.pendingQueueJoin = null;
     this.pendingJoin = payload;
+    this.leaveQueueIfNeeded();
     this.leaveRoomIfNeeded();
     this.setState({
       errorMessage: null,
@@ -418,12 +504,84 @@ export class MultiplayerMatchController {
       multiplayerResult: null,
       reconnectSecondsRemaining: null,
       opponentSnapshot: null,
+      roomKind: options?.roomKind ?? 'casual',
+      tokenId: options?.tokenId ?? null,
+      entryFeeTierId: options?.entryFeeTierId ?? null,
+      localFunded: Boolean(options?.paymentIntentId),
+      opponentFunded: false,
+      queueStatus: 'idle',
+      queueEntryId: null,
     });
     this.emitOpponentSnapshot(null);
     this.connect();
     if (this.socket.connected) {
       this.socket.emit('room:join', payload);
       this.pendingJoin = null;
+    }
+  }
+
+  joinPaidQueue(
+    nickname: string,
+    characterId: CharacterId,
+    options: {
+      accessToken: string;
+      tokenId: string;
+      entryFeeTierId: string;
+      paymentIntentId: string;
+    }
+  ) {
+    const payload: QueueJoinPayload = {
+      nickname: nickname.trim() || 'Player',
+      clientId: this.clientId,
+      characterId,
+      accessToken: options.accessToken,
+      tokenId: options.tokenId,
+      entryFeeTierId: options.entryFeeTierId,
+      paymentIntentId: options.paymentIntentId,
+    };
+
+    this.pendingCreate = null;
+    this.pendingJoin = null;
+    this.pendingQueueJoin = payload;
+    this.leaveRoomIfNeeded();
+    this.setState({
+      errorMessage: null,
+      pendingAction: 'queueing',
+      roomCode: null,
+      localPlayer: null,
+      opponent: null,
+      localReady: false,
+      opponentReady: false,
+      matchStatus: 'idle',
+      multiplayerResult: null,
+      reconnectSecondsRemaining: null,
+      opponentSnapshot: null,
+      roomKind: 'paid_queue',
+      tokenId: options.tokenId,
+      entryFeeTierId: options.entryFeeTierId,
+      localFunded: true,
+      opponentFunded: false,
+      queueStatus: 'queued',
+      queueEntryId: null,
+    });
+    this.emitOpponentSnapshot(null);
+    this.connect();
+    if (this.socket.connected) {
+      this.socket.emit('queue:join', payload);
+    }
+  }
+
+  leavePaidQueue() {
+    if (!this.state.queueEntryId && !this.pendingQueueJoin) return;
+
+    const queueEntryId = this.state.queueEntryId;
+    this.pendingQueueJoin = null;
+    this.setState({
+      pendingAction: 'leaving_queue',
+    });
+
+    if (this.socket.connected) {
+      this.socket.emit('queue:leave', { queueEntryId: queueEntryId ?? undefined });
     }
   }
 
@@ -485,6 +643,8 @@ export class MultiplayerMatchController {
     this.clearCountdownTimer();
     this.pendingCreate = null;
     this.pendingJoin = null;
+    this.pendingQueueJoin = null;
+    this.leaveQueueIfNeeded();
     this.leaveRoomIfNeeded();
     this.state = {
       ...initialViewState,

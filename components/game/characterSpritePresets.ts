@@ -19,13 +19,15 @@ export type CharacterDefinition = {
   spritePreset: CharacterSpritePreset;
 };
 
-// --- Shared sheet layout: design space 1024×571; 4K assets are 5504×3072 ---
+// Shared sheet layout: design space 1024×571; gameplay sheets are downscaled to 1376×768
+// to reduce decode time and memory pressure on mobile.
+export const CHARACTER_SHEET_WIDTH = 1376;
+export const CHARACTER_SHEET_HEIGHT = 768;
+
 const BASE_SHEET_WIDTH = 1024;
 const BASE_SHEET_HEIGHT = 571;
-const SHEET_4K_WIDTH = 5504;
-const SHEET_4K_HEIGHT = 3072;
-const X_SCALE_4K = SHEET_4K_WIDTH / BASE_SHEET_WIDTH;
-const Y_SCALE_4K = SHEET_4K_HEIGHT / BASE_SHEET_HEIGHT;
+const X_SCALE = CHARACTER_SHEET_WIDTH / BASE_SHEET_WIDTH;
+const Y_SCALE = CHARACTER_SHEET_HEIGHT / BASE_SHEET_HEIGHT;
 
 const scaleFrame = (frame: SpriteFrame, xScale: number, yScale: number): SpriteFrame => ({
   x: Math.round(frame.x * xScale),
@@ -34,7 +36,7 @@ const scaleFrame = (frame: SpriteFrame, xScale: number, yScale: number): SpriteF
   height: Math.round(frame.height * yScale),
 });
 
-/** Base frame rects in 1024×571 design space. 1K assets use as-is; 4K use scaled. */
+/** Base frame rects in 1024×571 design space; scaled to the normalized gameplay sheet size. */
 const BASE_ACTIONS: Record<CharacterAction, readonly SpriteFrame[]> = {
   run: [
     { x: 32, y: 12, width: 107, height: 160 },
@@ -66,119 +68,72 @@ const SHARED_FRAME_SLOWDOWNS: Record<CharacterAction, number> = {
   fall: 2,
 };
 
-/** 4K sheet: frames scaled to 5504×3072; feet trim in 4K pixels. */
-const ACTIONS_4K: Record<CharacterAction, readonly SpriteFrame[]> = {
-  run: BASE_ACTIONS.run.map((f) => scaleFrame(f, X_SCALE_4K, Y_SCALE_4K)),
-  jump: BASE_ACTIONS.jump.map((f) => scaleFrame(f, X_SCALE_4K, Y_SCALE_4K)),
-  fall: BASE_ACTIONS.fall.map((f) => scaleFrame(f, X_SCALE_4K, Y_SCALE_4K)),
-  idle: BASE_ACTIONS.idle.map((f) => scaleFrame(f, X_SCALE_4K, Y_SCALE_4K)),
+const ACTIONS: Record<CharacterAction, readonly SpriteFrame[]> = {
+  run: BASE_ACTIONS.run.map((f) => scaleFrame(f, X_SCALE, Y_SCALE)),
+  jump: BASE_ACTIONS.jump.map((f) => scaleFrame(f, X_SCALE, Y_SCALE)),
+  fall: BASE_ACTIONS.fall.map((f) => scaleFrame(f, X_SCALE, Y_SCALE)),
+  idle: BASE_ACTIONS.idle.map((f) => scaleFrame(f, X_SCALE, Y_SCALE)),
 };
-const FEET_TRIM_4K_PX = Math.round(8 * Y_SCALE_4K);
+const FEET_TRIM_PX = Math.round(8 * Y_SCALE);
 
 type PresetOverrides = Partial<
   Pick<CharacterSpritePreset, 'renderScaleMultiplier' | 'feetTrimPx' | 'frameSlowdowns' | 'actions'>
 >;
 
-/** Creates a preset for 4K assets (5504×3072). */
-function createCharacterPreset4K(
+function createCharacterPreset(
   imageSource: number,
   overrides: PresetOverrides = {}
 ): CharacterSpritePreset {
   return {
     imageSource,
     renderScaleMultiplier: 1.25,
-    feetTrimPx: FEET_TRIM_4K_PX,
+    feetTrimPx: FEET_TRIM_PX,
     frameSlowdowns: SHARED_FRAME_SLOWDOWNS,
-    actions: ACTIONS_4K,
+    actions: ACTIONS,
     ...overrides,
   };
 }
 
-/**
- * Creates a preset for assets with a custom sheet size. Base layout (1024×571) is scaled to
- * sheetWidth×sheetHeight so frame rects match the actual image pixels.
- */
-function createCharacterPresetCustomSheet(
-  imageSource: number,
-  sheetWidth: number,
-  sheetHeight: number,
-  overrides: PresetOverrides = {}
-): CharacterSpritePreset {
-  const xScale = sheetWidth / BASE_SHEET_WIDTH;
-  const yScale = sheetHeight / BASE_SHEET_HEIGHT;
-  const actions: Record<CharacterAction, readonly SpriteFrame[]> = {
-    run: BASE_ACTIONS.run.map((f) => scaleFrame(f, xScale, yScale)),
-    jump: BASE_ACTIONS.jump.map((f) => scaleFrame(f, xScale, yScale)),
-    fall: BASE_ACTIONS.fall.map((f) => scaleFrame(f, xScale, yScale)),
-    idle: BASE_ACTIONS.idle.map((f) => scaleFrame(f, xScale, yScale)),
-  };
-  const feetTrimPx = Math.round(8 * yScale);
-  return {
-    imageSource,
-    renderScaleMultiplier: 1.25,
-    feetTrimPx,
-    frameSlowdowns: SHARED_FRAME_SLOWDOWNS,
-    actions,
-    ...overrides,
-  };
-}
+// export const PIXEL_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
+//   require('../../assets/game/pixel.png')
+// );
 
-export const PRI_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset4K(
-  require('../../assets/game/pri.png')
+// export const RAJ_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
+//   require('../../assets/game/raj.png')
+// );
+
+export const TRUMP_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
+  require('../../assets/game/trump.png')
 );
 
-export const V3_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset4K(
-  require('../../assets/game/v3.png')
+export const TOLYMASTER_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
+  require('../../assets/game/tolytoday.png')
 );
 
-export const PIXEL_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset4K(
-  require('../../assets/game/pixel.png')
+export const SKELI_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
+  require('../../assets/game/skieli.png')
 );
 
-/** raj.png is 1376×768 — use custom sheet so frame rects match image pixels. */
-export const RAJ_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPresetCustomSheet(
-  require('../../assets/game/raj.png'),
-  1376,
-  768
+export const ELON_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
+  require('../../assets/game/elon.png')
 );
 
-/** tolymaster.png and elon.png are 1376×768 — same layout as raj. */
-export const TOLYMASTER_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPresetCustomSheet(
-  require('../../assets/game/tolymaster.png'),
-  1376,
-  768
-);
-
-export const ELON_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPresetCustomSheet(
-  require('../../assets/game/elon.png'),
-  1376,
-  768
+export const LAD_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
+  require('../../assets/game/laddy.png')
 );
 
 export const CHARACTER_DEFINITIONS: readonly CharacterDefinition[] = [
   {
     id: 'v3',
-    displayName: 'V3',
+    displayName: 'Trump',
     previewOrder: 0,
-    spritePreset: V3_CHARACTER_PRESET,
+    spritePreset: TRUMP_CHARACTER_PRESET,
   },
   {
-    id: 'pri',
-    displayName: 'Pri',
-    previewOrder: 1,
-    spritePreset: PRI_CHARACTER_PRESET,
-  },
-  {
-    id: 'pixel',
-    displayName: 'Pixel',
-    previewOrder: 2,
-    spritePreset: PIXEL_CHARACTER_PRESET,
-  },
-  {
-    id: 'raj',
-    displayName: 'Raj',
+    id: 'skieli',
+    displayName: 'Skieli',
     previewOrder: 3,
-    spritePreset: RAJ_CHARACTER_PRESET,
+    spritePreset: SKELI_CHARACTER_PRESET,
   },
   {
     id: 'tolymaster',
@@ -191,6 +146,12 @@ export const CHARACTER_DEFINITIONS: readonly CharacterDefinition[] = [
     displayName: 'Elon',
     previewOrder: 5,
     spritePreset: ELON_CHARACTER_PRESET,
+  },
+  {
+    id: 'lad',
+    displayName: 'Mad Lad',
+    previewOrder: 6,
+    spritePreset: LAD_CHARACTER_PRESET,
   },
 ] as const;
 

@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import {
+  ActivityIndicator,
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { GestureDetector } from 'react-native-gesture-handler';
 import type { SharedValue } from 'react-native-reanimated';
@@ -253,6 +261,7 @@ const DebugOverlay = React.memo(
 );
 
 export const GameCanvas = ({
+  restartKey = 0,
   onExit,
   onGameOver,
   onAudioEvent,
@@ -371,6 +380,7 @@ export const GameCanvas = ({
   const stableGroundY = height - groundHeight;
   const charSize = CHAR_SIZE * CHAR_SCALE;
   const { scoreValue, platforms } = useScoreAndChunks({
+    restartKey,
     width,
     height,
     groundY: stableGroundY,
@@ -382,7 +392,7 @@ export const GameCanvas = ({
     width,
     height,
     refs,
-    triggerAudioEvent: (event) => triggerAudioEvent(event),
+    triggerAudioEvent,
     triggerGameOver,
     onLocalState,
     onLocalDeath,
@@ -390,7 +400,7 @@ export const GameCanvas = ({
 
   const tapGesture = useGameGestures({
     refs,
-    triggerAudioEvent: (event) => triggerAudioEvent(event),
+    triggerAudioEvent,
     onFlipInput,
   });
 
@@ -436,6 +446,7 @@ export const GameCanvas = ({
     opponentGravity,
     opponentInitialGravityDirection,
     opponentPosY,
+    restartKey,
     stableGroundY,
   ]);
 
@@ -476,7 +487,14 @@ export const GameCanvas = ({
     return () => {
       clearInterval(timer);
     };
-  }, [countdownLocked, refs.initialized, refs.velocityX, triggerAudioEvent, worldAssetsReady]);
+  }, [
+    countdownLocked,
+    refs.initialized,
+    refs.velocityX,
+    restartKey,
+    triggerAudioEvent,
+    worldAssetsReady,
+  ]);
 
   const countdownImageSource = useMemo(() => {
     if (countdownDigit === 1) {
@@ -541,22 +559,22 @@ export const GameCanvas = ({
 
       <GestureDetector gesture={tapGesture}>
         <Canvas style={styles.canvas}>
-          {worldAssetsReady && backgroundPicture && (
+          {backgroundPicture && (
             <Group transform={backgroundTransform}>
               <Picture picture={backgroundPicture} />
             </Group>
           )}
-          {worldAssetsReady && platformsPicture && (
+          {platformsPicture && (
             <Group transform={platformsTransform}>
               <Picture picture={platformsPicture} />
             </Group>
           )}
-          {worldAssetsReady && colliderDebugPicture && (
+          {colliderDebugPicture && (
             <Group transform={platformsTransform}>
               <Picture picture={colliderDebugPicture} />
             </Group>
           )}
-          {worldAssetsReady && characterImage && (
+          {characterImage && (
             <Group transform={characterRenderTransform}>
               <Atlas
                 image={characterImage}
@@ -565,7 +583,7 @@ export const GameCanvas = ({
               />
             </Group>
           )}
-          {worldAssetsReady && opponentImage ? (
+          {opponentCharacterId && opponentImage ? (
             <Group transform={opponentRenderTransform}>
               <Atlas
                 image={opponentImage}
@@ -592,6 +610,13 @@ export const GameCanvas = ({
       {ENABLE_COLLIDER_DEBUG_UI && (
         <View pointerEvents="none" style={[styles.debugHud, { top: 8 }]}>
           <Text style={styles.debugHudText}>BOX COLLIDERS ON</Text>
+        </View>
+      )}
+
+      {!worldAssetsReady && (
+        <View pointerEvents="none" style={styles.loadingOverlay}>
+          <ActivityIndicator color="#ffffff" size="large" />
+          <Text style={styles.loadingText}>Loading game assets…</Text>
         </View>
       )}
 
@@ -706,6 +731,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 0.8,
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    backgroundColor: 'rgba(0,0,0,0.52)',
+  },
+  loadingText: {
+    color: '#f8fafc',
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: 0.3,
   },
   countdownOverlay: {
     ...StyleSheet.absoluteFillObject,

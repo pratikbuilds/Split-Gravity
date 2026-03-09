@@ -1,5 +1,5 @@
 import React, { memo, useEffect, useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { Atlas, Canvas, Group, rect, useImage, useRSXformBuffer } from '@shopify/react-native-skia';
 import type { CharacterId } from '../../shared/characters';
 import { getCharacterPresetOrDefault } from '../game/characterSpritePresets';
@@ -85,6 +85,12 @@ export const CharacterSpritePreview = memo(
 
     return (
       <View style={[styles.frame, { width: size, height: size, backgroundColor }]}>
+        {!image ? (
+          <View pointerEvents="none" style={styles.loadingOverlay}>
+            <ActivityIndicator color="#e5e7eb" size="small" />
+            <Text style={styles.loadingText}>Loading character…</Text>
+          </View>
+        ) : null}
         <Canvas style={styles.canvas}>
           {image ? (
             <Group>
@@ -106,5 +112,16 @@ const styles = StyleSheet.create({
   },
   canvas: {
     flex: 1,
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  loadingText: {
+    color: '#cbd5e1',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

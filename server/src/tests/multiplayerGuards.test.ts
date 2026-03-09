@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { MatchStatePacket } from '../../../shared/multiplayer-contracts';
+import type { MatchStatePacket } from '../shared/multiplayer-contracts';
 import {
   MAX_CLIENT_ID_LENGTH,
   MAX_NICKNAME_LENGTH,

@@ -1,6 +1,7 @@
+import type { CharacterId } from '../../shared/characters';
 import type { TerrainTheme } from '../../types/game';
 import { GAME_BACKGROUNDS } from '../../utils/backgrounds';
-import { CHARACTER_DEFINITIONS } from './characterSpritePresets';
+import { CHARACTER_DEFINITIONS, getCharacterDefinitionOrDefault } from './characterSpritePresets';
 
 const GRASS_TERRAIN_ASSETS = {
   top: require('../../assets/game/terrain/default/terrain_grass_block_top.png'),
@@ -82,10 +83,9 @@ export const CHARACTER_STARTUP_ASSETS = CHARACTER_DEFINITIONS.map(
   ({ spritePreset }) => spritePreset.imageSource
 );
 
-export const GAME_STARTUP_ASSETS: number[] = Array.from(
+export const GAME_ENVIRONMENT_ASSETS: number[] = Array.from(
   new Set([
     ...GAME_BACKGROUNDS,
-    ...CHARACTER_STARTUP_ASSETS,
     ...TERRAIN_STARTUP_ASSETS,
     MIDDLE_PLATFORM_ASSETS.left,
     MIDDLE_PLATFORM_ASSETS.center,
@@ -95,3 +95,15 @@ export const GAME_STARTUP_ASSETS: number[] = Array.from(
     COUNTDOWN_DIGIT_ASSETS[3],
   ])
 );
+
+export const getCharacterAssets = (
+  characterIds: readonly (CharacterId | null | undefined)[]
+): number[] => {
+  return Array.from(
+    new Set(
+      characterIds
+        .filter((characterId): characterId is CharacterId => characterId != null)
+        .map((characterId) => getCharacterDefinitionOrDefault(characterId).spritePreset.imageSource)
+    )
+  );
+};

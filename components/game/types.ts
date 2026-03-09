@@ -12,6 +12,7 @@ import type {
 export type GravityDirection = 1 | -1;
 
 export type GameCanvasProps = {
+  restartKey?: number;
   onExit?: () => void;
   onGameOver?: (result: GameResult) => void;
   onAudioEvent?: (event: GameAudioEvent) => void;

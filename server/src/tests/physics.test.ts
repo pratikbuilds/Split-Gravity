@@ -1,11 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as physicsModule from '../../../shared/game/physics';
+import * as physicsModule from '../shared/game/physics';
 
-const physicsCjs = physicsModule as typeof import('../../../shared/game/physics') & {
-  default?: typeof import('../../../shared/game/physics');
-};
-const physics = physicsCjs.default ?? physicsCjs;
+const physics = physicsModule;
 
 test('normalizeFrameStep clamps dt and computes substeps', () => {
   const clamped = physics.normalizeFrameStep(120);

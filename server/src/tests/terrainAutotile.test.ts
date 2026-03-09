@@ -1,11 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as terrainAutotileModule from '../../../shared/game/terrainAutotile';
+import * as terrainAutotileModule from '../shared/game/terrainAutotile';
 
-const terrainAutotileCjs = terrainAutotileModule as typeof import('../../../shared/game/terrainAutotile') & {
-  default?: typeof import('../../../shared/game/terrainAutotile');
-};
-const terrainAutotile = terrainAutotileCjs.default ?? terrainAutotileCjs;
+const terrainAutotile = terrainAutotileModule;
 const isSurfaceEdgeGap = terrainAutotile.isSurfaceEdgeGap;
 
 type Rect = { x: number; y: number; width: number; height: number };

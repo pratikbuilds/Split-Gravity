@@ -8,6 +8,7 @@ import { CHAR_SCALE, CHAR_SIZE, PLAYER_X_FACTOR, groundHeight, tileSize } from '
 import type { GravityDirection, SimulationRefs } from './types';
 
 interface UseScoreAndChunksArgs {
+  restartKey: number;
   width: number;
   height: number;
   groundY: number;
@@ -40,6 +41,7 @@ export interface UseScoreAndChunksResult {
 }
 
 export const useScoreAndChunks = ({
+  restartKey,
   width,
   height,
   groundY,
@@ -84,7 +86,7 @@ export const useScoreAndChunks = ({
     const config = { groundY, tileSize, screenWidth: width };
     const initialChunks = preGenerateLevelChunks(config);
     setChunks(initialChunks);
-  }, [groundY, height, initialGravityDirection, lastSpawnAt, refs, scoreValue, width]);
+  }, [groundY, height, initialGravityDirection, lastSpawnAt, refs, restartKey, scoreValue, width]);
 
   useEffect(() => {
     const rects: number[] = [];

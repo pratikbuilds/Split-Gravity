@@ -24,3 +24,4 @@ android
 
 # Local git worktrees
 .worktrees
+.pnpm-store/
