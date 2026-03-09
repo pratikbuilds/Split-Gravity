@@ -82,7 +82,9 @@ export class MultiplayerMatchController {
   private lastStateSentAt = 0;
   private lastSentState: Omit<MatchStatePacket, 't'> | null = null;
   private countdownTimer: ReturnType<typeof setTimeout> | null = null;
+  private createRoomTimeout: ReturnType<typeof setTimeout> | null = null;
   private intentionallyDisconnecting = false;
+  private static readonly CREATE_ROOM_TIMEOUT_MS = 18_000;
 
   constructor(serverUrl = resolveConfiguredBackendUrl()) {
     this.serverUrl = serverUrl;
@@ -172,6 +174,7 @@ export class MultiplayerMatchController {
 
     this.socket.on('connect_error', (error) => {
       this.intentionallyDisconnecting = false;
+      this.clearCreateRoomTimeout();
       const reason = error.message || 'connection failed';
       this.setState({
         connected: false,
@@ -182,6 +185,7 @@ export class MultiplayerMatchController {
     });
 
     this.socket.on('room:created', ({ roomCode, player, roomKind }) => {
+      this.clearCreateRoomTimeout();
       this.setState({
         roomCode,
         localPlayer: player,
@@ -283,6 +287,7 @@ export class MultiplayerMatchController {
     });
 
     this.socket.on('error', ({ code, message }) => {
+      this.clearCreateRoomTimeout();
       if (code === 'PAID_ROOM_CANCELLED' || code === 'PAID_ROOM_EXPIRED') {
         this.clearCountdownTimer();
         this.pendingCreate = null;
@@ -307,6 +312,12 @@ export class MultiplayerMatchController {
     if (!this.countdownTimer) return;
     clearTimeout(this.countdownTimer);
     this.countdownTimer = null;
+  }
+
+  private clearCreateRoomTimeout() {
+    if (!this.createRoomTimeout) return;
+    clearTimeout(this.createRoomTimeout);
+    this.createRoomTimeout = null;
   }
 
   private syncRoomState(room: RoomSnapshot) {
@@ -397,6 +408,7 @@ export class MultiplayerMatchController {
 
   disconnect() {
     this.clearCountdownTimer();
+    this.clearCreateRoomTimeout();
     this.pendingCreate = null;
     this.pendingJoin = null;
     this.pendingQueueJoin = null;
@@ -455,11 +467,21 @@ export class MultiplayerMatchController {
       queueEntryId: null,
     });
     this.emitOpponentSnapshot(null);
+    this.clearCreateRoomTimeout();
     this.connect();
     if (this.socket.connected) {
       this.socket.emit('room:create', payload);
       this.pendingCreate = null;
     }
+    this.createRoomTimeout = setTimeout(() => {
+      this.createRoomTimeout = null;
+      if (this.state.pendingAction !== 'creating_room') return;
+      this.pendingCreate = null;
+      this.setState({
+        pendingAction: 'none',
+        errorMessage: `Connection timed out. Check that ${this.serverUrl} is reachable.`,
+      });
+    }, MultiplayerMatchController.CREATE_ROOM_TIMEOUT_MS);
   }
 
   joinRoom(

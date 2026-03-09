@@ -9,9 +9,10 @@ export type MultiplayerSocket = Socket<ServerToClientEvents, ClientToServerEvent
 export const createMultiplayerSocket = (url: string): MultiplayerSocket => {
   return io(url, {
     autoConnect: false,
-    transports: ['websocket'],
+    // Polling first then upgrade to websocket improves connectivity behind some proxies/corporate networks.
+    transports: ['polling', 'websocket'],
     reconnection: true,
     reconnectionAttempts: 8,
-    timeout: 8000,
+    timeout: 12000,
   });
 };

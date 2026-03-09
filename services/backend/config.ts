@@ -27,7 +27,9 @@ export const resolveConfiguredBackendUrl = (): string => {
   const configuredUrl =
     process.env.EXPO_PUBLIC_BACKEND_URL?.trim() || process.env.EXPO_PUBLIC_MULTIPLAYER_URL?.trim();
   if (configuredUrl) return configuredUrl;
-  // Android developer build: use production backend when no env is set (no localhost fallback).
-  if (Platform.OS === 'android') return DEFAULT_BACKEND_SERVER_URL;
-  return resolveDefaultServerUrl() || DEFAULT_BACKEND_SERVER_URL;
+  // In dev (Metro), use local backend when reachable; otherwise use production so "Create room" works.
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    return resolveDefaultServerUrl() || DEFAULT_BACKEND_SERVER_URL;
+  }
+  return DEFAULT_BACKEND_SERVER_URL;
 };
