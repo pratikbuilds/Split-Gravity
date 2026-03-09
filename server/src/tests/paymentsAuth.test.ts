@@ -3,14 +3,8 @@ import test from 'node:test';
 import nacl from 'tweetnacl';
 import { createSignInMessageText } from '@solana/wallet-standard-util';
 import { Keypair } from '@solana/web3.js';
-import * as walletAuthShared from '../../../shared/walletAuth';
+import { createWalletSignInMessageFields } from '../shared/walletAuth';
 import { createSession, createWalletNonce, verifyWalletSignature } from '../payments/auth';
-
-const sharedWalletAuth =
-  'default' in walletAuthShared
-    ? (walletAuthShared.default as typeof import('../../../shared/walletAuth'))
-    : walletAuthShared;
-const { createWalletSignInMessageFields } = sharedWalletAuth;
 
 test('wallet signature verification succeeds for a signed nonce message', () => {
   const keypair = Keypair.generate();

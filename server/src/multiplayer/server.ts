@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import * as sharedCharactersModule from '../../../shared/characters';
 import type {
   MatchRoomKind,
   MatchResult,
   MatchStatePacket,
   QueueStatePayload,
-} from '../../../shared/multiplayer-contracts';
+} from '../shared/multiplayer-contracts';
+import { DEFAULT_CHARACTER_ID, isCharacterId } from '../shared/characters';
 import { createHttpApp } from '../app/createHttpApp';
 import { createSocketServer } from '../app/createSocketServer';
 import { env } from '../config/env';
@@ -30,13 +30,6 @@ import {
   type ServerPlayer,
 } from './runtime';
 import { paymentService } from '../payments/service';
-
-const sharedCharacters =
-  'default' in sharedCharactersModule
-    ? (sharedCharactersModule.default as typeof import('../../../shared/characters'))
-    : sharedCharactersModule;
-
-const { DEFAULT_CHARACTER_ID, isCharacterId } = sharedCharacters;
 
 const PORT = env.PORT;
 const RECONNECT_GRACE_MS = 10_000;

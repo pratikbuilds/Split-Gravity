@@ -2,14 +2,8 @@ import { randomBytes } from 'node:crypto';
 import nacl from 'tweetnacl';
 import { createSignInMessageText, parseSignInMessageText } from '@solana/wallet-standard-util';
 import { PublicKey } from '@solana/web3.js';
-import * as walletAuthShared from '../../../shared/walletAuth';
+import { createWalletSignInMessageFields } from '../shared/walletAuth';
 import { NONCE_TTL_MS, SESSION_TTL_MS } from './config';
-
-const sharedWalletAuth =
-  'default' in walletAuthShared
-    ? (walletAuthShared.default as typeof import('../../../shared/walletAuth'))
-    : walletAuthShared;
-const { createWalletSignInMessageFields } = sharedWalletAuth;
 
 export interface WalletNonceRecord {
   nonce: string;

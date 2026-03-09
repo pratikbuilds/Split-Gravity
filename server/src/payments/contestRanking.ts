@@ -1,4 +1,4 @@
-import type { LeaderboardEntry } from '../../../shared/payment-contracts';
+import type { LeaderboardEntry } from '../shared/payment-contracts';
 
 export const rankLeaderboard = <T extends { bestDistance: number; achievedAt: string }>(
   rows: T[]

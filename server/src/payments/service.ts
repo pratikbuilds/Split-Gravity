@@ -7,7 +7,7 @@ import type {
   SubmitRunResultRequest,
   WalletVerifyRequest,
   WithdrawalRequestPayload,
-} from '../../../shared/payment-contracts';
+} from '../shared/payment-contracts';
 import { env } from '../config/env';
 import {
   PostgresRuntimeStateRepository,

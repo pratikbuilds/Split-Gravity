@@ -4,16 +4,10 @@ import nacl from 'tweetnacl';
 import { createSignInMessageText } from '@solana/wallet-standard-util';
 import { Keypair, type Connection } from '@solana/web3.js';
 import { newDb } from 'pg-mem';
-import * as walletAuthShared from '../../../shared/walletAuth';
+import { createWalletSignInMessageFields } from '../shared/walletAuth';
 import { PostgresRuntimeStateRepository } from '../lib/runtimeStateRepository';
 import { PaymentService } from '../payments/service';
 import { PaymentStore } from '../payments/store';
-
-const sharedWalletAuth =
-  'default' in walletAuthShared
-    ? (walletAuthShared.default as typeof import('../../../shared/walletAuth'))
-    : walletAuthShared;
-const { createWalletSignInMessageFields } = sharedWalletAuth;
 
 const createMockVerifiedConnection = () => {
   const transactions = new Map<

@@ -16,13 +16,7 @@ import {
 } from '@solana/web3.js';
 import { PaymentService } from '../payments/service';
 import { PaymentStore } from '../payments/store';
-import * as walletAuthShared from '../../../shared/walletAuth';
-
-const sharedWalletAuth =
-  'default' in walletAuthShared
-    ? (walletAuthShared.default as typeof import('../../../shared/walletAuth'))
-    : walletAuthShared;
-const { createWalletSignInMessageFields } = sharedWalletAuth;
+import { createWalletSignInMessageFields } from '../shared/walletAuth';
 
 const runDevnetTest = process.env.RUN_DEVNET_PAYMENT_E2E === '1' ? test : test.skip;
 const LAMPORTS_PER_SOL = 1_000_000_000;

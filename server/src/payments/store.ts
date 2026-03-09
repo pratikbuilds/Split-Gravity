@@ -11,7 +11,7 @@ import type {
   WalletLedgerBalance,
   WithdrawalRequestPayload,
   WithdrawalRequestResponse,
-} from '../../../shared/payment-contracts';
+} from '../shared/payment-contracts';
 import { applyRankings } from './contestRanking';
 import { getActiveDailyContests, SUPPORTED_TOKENS, VAULT_PUBLIC_KEY } from './config';
 

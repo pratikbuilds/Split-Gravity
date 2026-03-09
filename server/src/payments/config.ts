@@ -1,4 +1,4 @@
-import type { DailyContest, SupportedToken } from '../../../shared/payment-contracts';
+import type { DailyContest, SupportedToken } from '../shared/payment-contracts';
 import { env } from '../config/env';
 
 const DEFAULT_PAYOUT_BPS = [3000, 2000, 1200, 1000, 800, 600, 500, 400, 300, 200];

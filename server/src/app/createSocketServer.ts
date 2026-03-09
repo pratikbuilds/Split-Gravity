@@ -3,7 +3,7 @@ import { Server } from 'socket.io';
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
-} from '../../../shared/multiplayer-contracts';
+} from '../shared/multiplayer-contracts';
 import { env } from '../config/env';
 
 export const createSocketServer = (app: Parameters<typeof createServer>[0]) => {

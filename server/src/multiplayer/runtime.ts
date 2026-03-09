@@ -4,13 +4,13 @@ import type {
   MatchState,
   PlayerSession,
   RoomSnapshot,
-} from '../../../shared/multiplayer-contracts';
-import type { CharacterId } from '../../../shared/characters';
+} from '../shared/multiplayer-contracts';
+import type { CharacterId } from '../shared/characters';
 
 export interface ServerPlayer extends PlayerSession {
   socketId: string;
   lastSeenAt: number;
-  lastState?: import('../../../shared/multiplayer-contracts').MatchStatePacket;
+  lastState?: import('../shared/multiplayer-contracts').MatchStatePacket;
   lastInputAt?: number;
   disconnectTimer?: ReturnType<typeof setTimeout>;
   reconnectInterval?: ReturnType<typeof setInterval>;
