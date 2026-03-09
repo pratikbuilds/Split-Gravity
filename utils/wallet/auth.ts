@@ -1,6 +1,14 @@
-import type { SignInPayload } from '@wallet-ui/react-native-web3js';
-import { createWalletSignInPayloadFields } from '../../shared/walletAuth';
+import { fromUint8Array, type SignInOutput } from '@wallet-ui/react-native-web3js';
+import type { WalletVerifyRequest } from '../../shared/payment-contracts';
 
-export const createWalletSignInPayload = (nonce: string): SignInPayload => {
-  return createWalletSignInPayloadFields(nonce, new Date().toISOString());
-};
+export const createWalletVerifyRequest = ({
+  nonce,
+  signInResult,
+}: {
+  nonce: string;
+  signInResult: SignInOutput;
+}): WalletVerifyRequest => ({
+  nonce,
+  signature: fromUint8Array(signInResult.signature),
+  signedMessage: fromUint8Array(signInResult.signedMessage),
+});

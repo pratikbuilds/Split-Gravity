@@ -1,14 +1,15 @@
 import { randomBytes } from 'node:crypto';
-import nacl from 'tweetnacl';
-import { createSignInMessageText, parseSignInMessageText } from '@solana/wallet-standard-util';
+import { verifySignIn } from '@solana/wallet-standard-util';
 import { PublicKey } from '@solana/web3.js';
-import { createWalletSignInMessageFields } from '../shared/walletAuth';
+import type { WalletSignInPayload } from '../shared/payment-contracts';
+import { createWalletSignInPayload } from '../shared/walletAuth';
 import { NONCE_TTL_MS, SESSION_TTL_MS } from './config';
 
-export interface WalletNonceRecord {
+export interface WalletSignInChallengeRecord {
   nonce: string;
   issuedAt: string;
   expiresAt: string;
+  signInPayload: WalletSignInPayload;
   consumedAt?: string;
 }
 
@@ -19,13 +20,19 @@ export interface WalletSessionRecord {
   expiresAt: string;
 }
 
-export const createWalletNonce = (): WalletNonceRecord => {
+export const createWalletChallenge = (walletAddress: string): WalletSignInChallengeRecord => {
   const issuedAt = new Date();
   const expiresAt = new Date(issuedAt.getTime() + NONCE_TTL_MS);
+  const nonce = randomBytes(18).toString('hex');
   return {
-    nonce: randomBytes(18).toString('hex'),
+    nonce,
     issuedAt: issuedAt.toISOString(),
     expiresAt: expiresAt.toISOString(),
+    signInPayload: createWalletSignInPayload({
+      walletAddress,
+      nonce,
+      issuedAt: issuedAt.toISOString(),
+    }),
   };
 };
 
@@ -39,46 +46,35 @@ export const createSession = (playerId: string, walletAddress: string): WalletSe
   };
 };
 
-export const verifyWalletSignature = ({
-  walletAddress,
+export const verifyWalletSignIn = ({
+  challenge,
   signedMessage,
   signature,
-  nonce,
 }: {
-  walletAddress: string;
+  challenge: WalletSignInChallengeRecord;
   signedMessage: string;
   signature: string;
-  nonce: string;
 }) => {
-  const publicKey = new PublicKey(walletAddress).toBytes();
   const messageBytes = Buffer.from(signedMessage, 'base64');
   const signatureBytes = Buffer.from(signature, 'base64');
-  const messageText = messageBytes.toString('utf8');
-  const isValid = nacl.sign.detached.verify(messageBytes, signatureBytes, publicKey);
+  const publicKey = new PublicKey(challenge.signInPayload.address).toBytes();
+
+  if (signatureBytes.length !== 64) {
+    throw new Error('Wallet signature must be 64 bytes.');
+  }
+
+  const isValid = verifySignIn(challenge.signInPayload, {
+    account: {
+      address: challenge.signInPayload.address,
+      publicKey,
+      chains: [],
+      features: [],
+    },
+    signedMessage: messageBytes,
+    signature: signatureBytes,
+  });
 
   if (!isValid) {
     throw new Error('Wallet signature verification failed.');
-  }
-
-  let parsedMessage: ReturnType<typeof parseSignInMessageText>;
-  try {
-    parsedMessage = parseSignInMessageText(messageText);
-  } catch {
-    throw new Error('Signed message format mismatch.');
-  }
-  if (!parsedMessage?.issuedAt) {
-    throw new Error('Signed message format mismatch.');
-  }
-
-  const expectedMessage = createSignInMessageText(
-    createWalletSignInMessageFields({
-      address: walletAddress,
-      nonce,
-      issuedAt: parsedMessage.issuedAt,
-    })
-  );
-
-  if (messageText !== expectedMessage) {
-    throw new Error('Signed message payload mismatch.');
   }
 };

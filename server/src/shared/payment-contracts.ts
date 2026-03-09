@@ -38,14 +38,29 @@ export interface LeaderboardEntry {
   payoutAmount?: string;
 }
 
-export interface WalletNonceResponse {
+export interface WalletSignInPayload {
+  domain: string;
+  address: string;
+  statement: string;
+  uri: string;
+  version: string;
+  chainId: string;
+  nonce: string;
+  issuedAt: string;
+  expirationTime?: string;
+  notBefore?: string;
+  requestId?: string;
+  resources?: string[];
+}
+
+export interface WalletChallengeResponse {
   nonce: string;
   issuedAt: string;
   expiresAt: string;
+  signInPayload: WalletSignInPayload;
 }
 
 export interface WalletVerifyRequest {
-  walletAddress: string;
   nonce: string;
   signedMessage: string;
   signature: string;

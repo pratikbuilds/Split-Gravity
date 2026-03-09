@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Buffer } from 'buffer';
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import { fromUint8Array, useMobileWallet } from '@wallet-ui/react-native-web3js';
+import { useMobileWallet } from '@wallet-ui/react-native-web3js';
 import { Transaction } from '@solana/web3.js';
 import type {
   DailyContest,
   PaymentIntentPurpose,
   SupportedToken,
 } from '../shared/payment-contracts';
-import { backendApi } from '../services/backend/api';
+import { backendApi, formatApiErrorForDebug } from '../services/backend/api';
 import type { PaidSetupResult } from '../types/payments';
 import { getWalletAddress, getWalletPublicKey } from '../utils/wallet/account';
-import { createWalletSignInPayload } from '../utils/wallet/auth';
+import { createWalletVerifyRequest } from '../utils/wallet/auth';
 import { formatWalletError } from '../utils/wallet/errors';
 
 type PaidModeSetupScreenProps = {
@@ -47,7 +47,31 @@ type PaymentProgress = {
   runSessionId?: string;
 };
 
+type ScreenError = {
+  summary: string;
+  details: string[];
+};
+
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const formatScreenError = (error: unknown, fallbackSummary: string): ScreenError => {
+  const apiDebug = formatApiErrorForDebug(error);
+  if (apiDebug) {
+    return apiDebug;
+  }
+
+  const summary =
+    error instanceof Error
+      ? error.message.trim() || fallbackSummary
+      : typeof error === 'string'
+        ? error.trim() || fallbackSummary
+        : fallbackSummary;
+
+  return {
+    summary,
+    details: [],
+  };
+};
 
 export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSetupScreenProps) => {
   const { account, connect, disconnect, signAndSendTransaction, signIn } = useMobileWallet();
@@ -58,7 +82,7 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
   const [selectedTierId, setSelectedTierId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ScreenError | null>(null);
   const [paymentProgress, setPaymentProgress] = useState<PaymentProgress | null>(null);
 
   useEffect(() => {
@@ -94,7 +118,7 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
         }
       } catch (nextError) {
         if (!cancelled) {
-          setError(nextError instanceof Error ? nextError.message : 'Failed to load paid setup.');
+          setError(formatScreenError(nextError, 'Failed to load paid setup.'));
         }
       } finally {
         if (!cancelled) {
@@ -169,12 +193,18 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
     setError(null);
 
     if (!selectedToken || !selectedTier) {
-      setError('Select a token and entry fee before continuing.');
+      setError({
+        summary: 'Select a token and entry fee before continuing.',
+        details: [],
+      });
       return;
     }
 
     if (contestUnavailable) {
-      setError('No active contest is available for that token and entry fee.');
+      setError({
+        summary: 'No active contest is available for that token and entry fee.',
+        details: [],
+      });
       return;
     }
 
@@ -192,15 +222,14 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
 
       let accessToken = currentProgress?.accessToken;
       if (!accessToken) {
-        const { nonce } = await backendApi.createWalletNonce();
-        const signInPayload = createWalletSignInPayload(nonce);
-        const signInResult = await signIn(signInPayload);
-        const auth = await backendApi.verifyWallet({
-          walletAddress: wallet,
-          nonce,
-          signature: fromUint8Array(signInResult.signature),
-          signedMessage: fromUint8Array(signInResult.signedMessage),
-        });
+        const challenge = await backendApi.createWalletChallenge(wallet);
+        const signInResult = await signIn(challenge.signInPayload);
+        const auth = await backendApi.verifyWallet(
+          createWalletVerifyRequest({
+            nonce: challenge.nonce,
+            signInResult,
+          })
+        );
         accessToken = auth.accessToken;
         setPaymentProgress({
           selectionKey,
@@ -292,7 +321,9 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
         },
       });
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : formatWalletError(nextError));
+      setError(
+        formatScreenError(nextError, formatWalletError(nextError) || 'Failed to fund entry.')
+      );
     } finally {
       setSubmitting(false);
     }
@@ -393,7 +424,16 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
 
         {error ? (
           <View className="mt-6 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3">
-            <Text className="text-sm leading-5 text-red-100">{error}</Text>
+            <Text className="text-sm font-semibold leading-5 text-red-100">{error.summary}</Text>
+            {error.details.length > 0 ? (
+              <View className="mt-3 gap-1 rounded-xl border border-red-200/10 bg-black/20 px-3 py-3">
+                {error.details.map((detail, index) => (
+                  <Text key={`${detail}:${index}`} className="text-xs leading-5 text-red-50/90">
+                    {detail}
+                  </Text>
+                ))}
+              </View>
+            ) : null}
           </View>
         ) : null}
 

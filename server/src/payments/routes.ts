@@ -21,10 +21,13 @@ type ResponseLike = {
 type RouteHandler = (request: RequestLike, response: ResponseLike) => void | Promise<void>;
 
 const verifyWalletSchema = z.object({
-  walletAddress: z.string().min(32),
   nonce: z.string().min(8),
   signedMessage: z.string().min(8),
   signature: z.string().min(8),
+});
+
+const createWalletChallengeSchema = z.object({
+  walletAddress: z.string().min(32),
 });
 
 const createPaymentIntentSchema = z.object({
@@ -76,8 +79,16 @@ const isUnauthorizedError = (error: unknown) =>
   (error.message === 'Missing bearer token.' || error.message === 'Session expired.');
 
 export const registerPaymentRoutes = (app: AppLike) => {
-  app.post('/auth/wallet/nonce', async (_request: RequestLike, response: ResponseLike) => {
-    response.json(await paymentService.issueNonce());
+  app.post('/auth/wallet/challenge', async (request: RequestLike, response: ResponseLike) => {
+    const parsed = createWalletChallengeSchema.safeParse(request.body);
+    if (!parsed.success) {
+      response
+        .status(400)
+        .json({ code: 'INVALID_REQUEST', message: 'Invalid wallet challenge payload.' });
+      return;
+    }
+
+    response.json(await paymentService.issueWalletChallenge(parsed.data.walletAddress));
   });
 
   app.post('/auth/wallet/verify', async (request: RequestLike, response: ResponseLike) => {

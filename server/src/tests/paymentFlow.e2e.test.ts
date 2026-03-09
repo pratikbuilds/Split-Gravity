@@ -16,7 +16,6 @@ import {
 } from '@solana/web3.js';
 import { PaymentService } from '../payments/service';
 import { PaymentStore } from '../payments/store';
-import { createWalletSignInMessageFields } from '../shared/walletAuth';
 
 const runDevnetTest = process.env.RUN_DEVNET_PAYMENT_E2E === '1' ? test : test.skip;
 const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -52,21 +51,14 @@ const fundAddress = async ({
 };
 
 const createSignedWalletSession = async (service: PaymentService, keypair: Keypair) => {
-  const nonce = await service.issueNonce();
+  const challenge = await service.issueWalletChallenge(keypair.publicKey.toBase58());
   const message = new TextEncoder().encode(
-    createSignInMessageText(
-      createWalletSignInMessageFields({
-        address: keypair.publicKey.toBase58(),
-        nonce: nonce.nonce,
-        issuedAt: nonce.issuedAt,
-      })
-    )
+    createSignInMessageText(challenge.signInPayload)
   );
   const signature = nacl.sign.detached(message, keypair.secretKey);
 
   return service.verifyWallet({
-    walletAddress: keypair.publicKey.toBase58(),
-    nonce: nonce.nonce,
+    nonce: challenge.nonce,
     signedMessage: Buffer.from(message).toString('base64'),
     signature: Buffer.from(signature).toString('base64'),
   });

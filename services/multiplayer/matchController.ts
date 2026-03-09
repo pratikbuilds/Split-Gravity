@@ -9,8 +9,8 @@ import type {
   RoomSnapshot,
 } from '../../shared/multiplayer-contracts';
 import type { CharacterId } from '../../shared/characters';
-import { NativeModules, Platform } from 'react-native';
 import type { MatchStatus, MultiplayerResult, OpponentSnapshot } from '../../types/game';
+import { resolveConfiguredBackendUrl } from '../backend/config';
 import { createMultiplayerSocket, type MultiplayerSocket } from './socketClient';
 
 export type MultiplayerViewState = {
@@ -69,36 +69,6 @@ const initialViewState: MultiplayerViewState = {
   queueEntryId: null,
 };
 
-const FALLBACK_SERVER_PORT = 4100;
-const DEFAULT_MULTIPLAYER_SERVER_URL = 'https://multiplayer-server-production-839e.up.railway.app';
-
-const resolveConfiguredServerUrl = () => {
-  const configuredUrl = process.env.EXPO_PUBLIC_MULTIPLAYER_URL?.trim();
-  if (configuredUrl) return configuredUrl;
-  return DEFAULT_MULTIPLAYER_SERVER_URL || resolveDefaultServerUrl();
-};
-
-const resolveDefaultServerUrl = () => {
-  const sourceUrl: string | undefined = NativeModules?.SourceCode?.scriptURL;
-  if (sourceUrl) {
-    try {
-      const parsed = new URL(sourceUrl);
-      if (parsed.hostname) {
-        return `http://${parsed.hostname}:${FALLBACK_SERVER_PORT}`;
-      }
-    } catch {
-      // Ignore parse errors and fallback below.
-    }
-  }
-
-  if (Platform.OS === 'android') {
-    // Android emulator loopback to host machine.
-    return `http://10.0.2.2:${FALLBACK_SERVER_PORT}`;
-  }
-
-  return `http://localhost:${FALLBACK_SERVER_PORT}`;
-};
-
 export class MultiplayerMatchController {
   private socket: MultiplayerSocket;
   private serverUrl: string;
@@ -114,7 +84,7 @@ export class MultiplayerMatchController {
   private countdownTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionallyDisconnecting = false;
 
-  constructor(serverUrl = resolveConfiguredServerUrl()) {
+  constructor(serverUrl = resolveConfiguredBackendUrl()) {
     this.serverUrl = serverUrl;
     this.socket = createMultiplayerSocket(serverUrl);
     this.clientId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;

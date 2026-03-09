@@ -3,27 +3,19 @@ import test from 'node:test';
 import nacl from 'tweetnacl';
 import { createSignInMessageText } from '@solana/wallet-standard-util';
 import { Keypair } from '@solana/web3.js';
-import { createWalletSignInMessageFields } from '../shared/walletAuth';
-import { createSession, createWalletNonce, verifyWalletSignature } from '../payments/auth';
+import { createSession, createWalletChallenge, verifyWalletSignIn } from '../payments/auth';
 
-test('wallet signature verification succeeds for a signed nonce message', () => {
+test('wallet sign-in verification succeeds for a server-issued challenge', () => {
   const keypair = Keypair.generate();
-  const nonce = createWalletNonce();
+  const challenge = createWalletChallenge(keypair.publicKey.toBase58());
   const message = new TextEncoder().encode(
-    createSignInMessageText(
-      createWalletSignInMessageFields({
-        address: keypair.publicKey.toBase58(),
-        nonce: nonce.nonce,
-        issuedAt: nonce.issuedAt,
-      })
-    )
+    createSignInMessageText(challenge.signInPayload)
   );
   const signature = nacl.sign.detached(message, keypair.secretKey);
 
   assert.doesNotThrow(() =>
-    verifyWalletSignature({
-      walletAddress: keypair.publicKey.toBase58(),
-      nonce: nonce.nonce,
+    verifyWalletSignIn({
+      challenge,
       signature: Buffer.from(signature).toString('base64'),
       signedMessage: Buffer.from(message).toString('base64'),
     })

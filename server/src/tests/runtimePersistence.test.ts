@@ -4,7 +4,6 @@ import nacl from 'tweetnacl';
 import { createSignInMessageText } from '@solana/wallet-standard-util';
 import { Keypair, type Connection } from '@solana/web3.js';
 import { newDb } from 'pg-mem';
-import { createWalletSignInMessageFields } from '../shared/walletAuth';
 import { PostgresRuntimeStateRepository } from '../lib/runtimeStateRepository';
 import { PaymentService } from '../payments/service';
 import { PaymentStore } from '../payments/store';
@@ -90,21 +89,14 @@ const createRepository = async () => {
 };
 
 const createSignedWalletSession = async (service: PaymentService, keypair: Keypair) => {
-  const nonce = await service.issueNonce();
+  const challenge = await service.issueWalletChallenge(keypair.publicKey.toBase58());
   const message = new TextEncoder().encode(
-    createSignInMessageText(
-      createWalletSignInMessageFields({
-        address: keypair.publicKey.toBase58(),
-        nonce: nonce.nonce,
-        issuedAt: nonce.issuedAt,
-      })
-    )
+    createSignInMessageText(challenge.signInPayload)
   );
   const signature = nacl.sign.detached(message, keypair.secretKey);
 
   return service.verifyWallet({
-    walletAddress: keypair.publicKey.toBase58(),
-    nonce: nonce.nonce,
+    nonce: challenge.nonce,
     signedMessage: Buffer.from(message).toString('base64'),
     signature: Buffer.from(signature).toString('base64'),
   });

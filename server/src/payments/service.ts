@@ -5,6 +5,7 @@ import type {
   PaymentIntentRequest,
   PaymentIntentTransactionRequest,
   SubmitRunResultRequest,
+  WalletChallengeResponse,
   WalletVerifyRequest,
   WithdrawalRequestPayload,
 } from '../shared/payment-contracts';
@@ -22,9 +23,9 @@ import {
 } from '../lib/solana/payments';
 import {
   createSession,
-  createWalletNonce,
-  verifyWalletSignature,
-  type WalletNonceRecord,
+  createWalletChallenge,
+  verifyWalletSignIn,
+  type WalletSignInChallengeRecord,
   type WalletSessionRecord,
 } from './auth';
 import { PaymentStore, type PaymentStoreSnapshot } from './store';
@@ -37,13 +38,13 @@ type PaymentServiceOptions = {
 };
 
 type WalletAuthSnapshot = Record<string, unknown> & {
-  nonces: WalletNonceRecord[];
+  challenges: WalletSignInChallengeRecord[];
   sessions: WalletSessionRecord[];
 };
 
 export class PaymentService {
   private readonly store: PaymentStore;
-  private readonly nonces = new Map<string, WalletNonceRecord>();
+  private readonly challenges = new Map<string, WalletSignInChallengeRecord>();
   private readonly sessions = new Map<string, WalletSessionRecord>();
   private readonly connection: Connection | null;
   private readonly vaultSigner: Keypair | null;
@@ -75,9 +76,9 @@ export class PaymentService {
         this.runtimeStateRepository?.load<PaymentStoreSnapshot>('payments') ?? Promise.resolve(null),
       ]);
 
-      this.nonces.clear();
-      for (const nonce of walletAuthSnapshot?.nonces ?? []) {
-        this.nonces.set(nonce.nonce, nonce);
+      this.challenges.clear();
+      for (const challenge of walletAuthSnapshot?.challenges ?? []) {
+        this.challenges.set(challenge.nonce, challenge);
       }
 
       this.sessions.clear();
@@ -113,7 +114,7 @@ export class PaymentService {
 
   private getWalletAuthSnapshot(): WalletAuthSnapshot {
     return {
-      nonces: [...this.nonces.values()],
+      challenges: [...this.challenges.values()],
       sessions: [...this.sessions.values()],
     };
   }
@@ -128,31 +129,35 @@ export class PaymentService {
     await this.runtimeStateRepository.save('payments', this.store.dumpSnapshot());
   }
 
-  async issueNonce() {
+  async issueWalletChallenge(walletAddress: string): Promise<WalletChallengeResponse> {
     await this.ensureInitialized();
-    const nonce = createWalletNonce();
-    this.nonces.set(nonce.nonce, nonce);
+    const challenge = createWalletChallenge(walletAddress);
+    this.challenges.set(challenge.nonce, challenge);
     await this.persistWalletAuthState();
-    return nonce;
+    return challenge;
   }
 
   async verifyWallet(payload: WalletVerifyRequest) {
     await this.ensureInitialized();
-    const nonceRecord = this.nonces.get(payload.nonce);
-    if (!nonceRecord) {
+    const challenge = this.challenges.get(payload.nonce);
+    if (!challenge) {
       throw new Error('Nonce not found.');
     }
-    if (nonceRecord.consumedAt) {
+    if (challenge.consumedAt) {
       throw new Error('Nonce already used.');
     }
-    if (new Date(nonceRecord.expiresAt).getTime() <= Date.now()) {
+    if (new Date(challenge.expiresAt).getTime() <= Date.now()) {
       throw new Error('Nonce expired.');
     }
 
-    verifyWalletSignature(payload);
-    nonceRecord.consumedAt = new Date().toISOString();
+    verifyWalletSignIn({
+      challenge,
+      signedMessage: payload.signedMessage,
+      signature: payload.signature,
+    });
+    challenge.consumedAt = new Date().toISOString();
 
-    const player = this.store.getOrCreatePlayer(payload.walletAddress);
+    const player = this.store.getOrCreatePlayer(challenge.signInPayload.address);
     const session = createSession(player.id, player.walletAddress);
     this.sessions.set(session.accessToken, session);
     await Promise.all([this.persistWalletAuthState(), this.persistPaymentState()]);
