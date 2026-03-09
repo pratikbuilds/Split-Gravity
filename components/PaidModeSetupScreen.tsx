@@ -1,18 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Buffer } from 'buffer';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMobileWallet } from '@wallet-ui/react-native-web3js';
-import { Transaction } from '@solana/web3.js';
 import type {
   DailyContest,
   PaymentIntentPurpose,
   SupportedToken,
 } from '../shared/payment-contracts';
 import { backendApi, formatApiErrorForDebug } from '../services/backend/api';
+import { fundPaymentIntent } from '../services/payments/fundPaymentIntent';
 import type { PaidSetupResult } from '../types/payments';
-import { getWalletAddress, getWalletPublicKey } from '../utils/wallet/account';
-import { createWalletVerifyRequest } from '../utils/wallet/auth';
+import { getWalletAddress } from '../utils/wallet/account';
 import { formatWalletError } from '../utils/wallet/errors';
 
 type PaidModeSetupScreenProps = {
@@ -27,18 +25,26 @@ const PURPOSE_COPY: Record<
 > = {
   single_paid_contest: {
     headline: 'Daily Paid Contest',
-    subtitle: 'Connect your wallet, choose token and entry fee, then pay to enter. Your best distance today counts for the leaderboard.',
+    subtitle:
+      'Connect your wallet, choose token and entry fee, then pay to enter. Your best distance today counts for the leaderboard.',
     cta: 'Pay Entry Fee',
   },
   multi_paid_private: {
     headline: 'Paid Private Room',
-    subtitle: 'Connect your wallet and set the stake amount. Both players must fund the same stake before the match.',
+    subtitle:
+      'Connect your wallet and set the stake amount. Both players must fund the same stake before the match.',
     cta: 'Connect & Set Stake',
   },
   multi_paid_queue: {
     headline: 'Paid Matchmaking',
-    subtitle: 'Connect your wallet and fund your stake, then join the queue to be matched with another paid player.',
+    subtitle:
+      'Connect your wallet and fund your stake, then join the queue to be matched with another paid player.',
     cta: 'Connect & Fund Stake',
+  },
+  character_generation: {
+    headline: 'AI Character Generation',
+    subtitle: 'Fund a one-off sprite generation to create a new runner for your gallery.',
+    cta: 'Fund Generation',
   },
 };
 
@@ -217,77 +223,40 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
 
       const connectedAccount = account ?? (await connect());
       const wallet = getWalletAddress(connectedAccount);
-      const publicKey = getWalletPublicKey(connectedAccount);
-      if (!wallet || !publicKey) {
+      if (!wallet) {
         throw new Error('Connected wallet account is missing a valid public key.');
       }
       const currentProgress =
         paymentProgress?.selectionKey === selectionKey ? paymentProgress : null;
 
-      let accessToken = currentProgress?.accessToken;
-      if (!accessToken) {
-        const challenge = await backendApi.createWalletChallenge(wallet);
-        const signInResult = await signIn(challenge.signInPayload);
-        const auth = await backendApi.verifyWallet(
-          createWalletVerifyRequest({
-            nonce: challenge.nonce,
-            signInResult,
-          })
-        );
-        accessToken = auth.accessToken;
-        setPaymentProgress({
-          selectionKey,
-          accessToken,
-        });
-      }
-
-      let paymentIntentId = currentProgress?.paymentIntentId;
-      if (!paymentIntentId) {
-        const paymentIntent = await backendApi.createPaymentIntent(accessToken, {
+      const funded = await runWithBackoff(() =>
+        fundPaymentIntent({
+          wallet: {
+            account: connectedAccount,
+            connect,
+            signIn,
+            signAndSendTransaction,
+          },
+          purpose,
           tokenId: selectedToken.id,
           entryFeeTierId: selectedTier.id,
-          purpose,
           contestId: contestId ?? undefined,
-        });
-        paymentIntentId = paymentIntent.paymentIntentId;
-        setPaymentProgress((existing) => ({
-          ...(existing ?? { selectionKey }),
-          selectionKey,
-          accessToken,
-          paymentIntentId,
-        }));
-      }
-
-      let transactionSignature = currentProgress?.transactionSignature;
-      if (!transactionSignature) {
-        const built = await backendApi.buildPaymentIntentTransaction(accessToken, paymentIntentId, {
-          walletAddress: wallet,
-        });
-        const transaction = Transaction.from(
-          Buffer.from(built.serializedTransactionBase64, 'base64')
-        );
-        const txSignature = await signAndSendTransaction(transaction, built.minContextSlot);
-        transactionSignature = Array.isArray(txSignature) ? txSignature[0] : txSignature;
-        setPaymentProgress((existing) => ({
-          ...(existing ?? { selectionKey }),
-          selectionKey,
-          accessToken,
-          paymentIntentId,
-          transactionSignature,
-        }));
-      }
-
-      await runWithBackoff(() =>
-        backendApi.confirmPaymentIntent(accessToken!, paymentIntentId!, {
-          transactionSignature: transactionSignature!,
-          walletAddress: wallet,
+          existingAccessToken: currentProgress?.accessToken,
+          existingPaymentIntentId: currentProgress?.paymentIntentId,
         })
       );
 
+      setPaymentProgress({
+        selectionKey,
+        accessToken: funded.accessToken,
+        paymentIntentId: funded.paymentIntentId,
+        transactionSignature: funded.transactionSignature,
+      });
+
       onComplete({
-        accessToken,
-        paymentIntentId: paymentIntentId!,
-        transactionSignature: transactionSignature!,
+        accessToken: funded.accessToken,
+        paymentIntentId: funded.paymentIntentId,
+        transactionSignature: funded.transactionSignature,
         selection: {
           purpose,
           token: selectedToken,
@@ -310,39 +279,36 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
   const topPad = Math.max(insets.top + 16, 56);
   const bottomPad = Math.max(insets.bottom, 24);
 
-  const flatTiers = tokens.flatMap((token) =>
-    token.entryFeeTiers.map((tier) => ({ token, tier }))
-  );
+  const flatTiers = tokens.flatMap((token) => token.entryFeeTiers.map((tier) => ({ token, tier })));
 
-  const ctaText = !walletAddress
-    ? 'Connect Wallet'
-    : submitting
-      ? 'Funding…'
-      : copy.cta;
+  const ctaText = !walletAddress ? 'Connect Wallet' : submitting ? 'Funding…' : copy.cta;
 
   return (
     <View style={styles.container}>
-      <View style={StyleSheet.absoluteFill} pointerEvents="none"><View style={styles.splitDiagonal} /></View>
-      
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        <View style={styles.splitDiagonal} />
+      </View>
 
       <ScrollView
-        className="flex-1 z-10"
+        className="z-10 flex-1"
         contentContainerStyle={{
           paddingHorizontal: 20,
           paddingTop: topPad,
           paddingBottom: bottomPad,
         }}
         showsVerticalScrollIndicator={false}>
-
-        <View className="flex-row items-center justify-between mb-8">
-          <Pressable onPress={onBack} disabled={submitting} className="active:opacity-80 px-4 py-2 bg-white/5 rounded-full border border-white/10">
-            <Text className="font-bold text-slate-300 uppercase tracking-wider text-xs">Back</Text>
+        <View className="mb-8 flex-row items-center justify-between">
+          <Pressable
+            onPress={onBack}
+            disabled={submitting}
+            className="rounded-full border border-white/10 bg-white/5 px-4 py-2 active:opacity-80">
+            <Text className="text-xs font-bold uppercase tracking-wider text-slate-300">Back</Text>
           </Pressable>
           {walletAddress ? (
             <Pressable
               onPress={() => void disconnect()}
               disabled={submitting}
-              className="rounded-full bg-slate-900/80 px-4 py-2 border border-slate-700 active:opacity-80">
+              className="rounded-full border border-slate-700 bg-slate-900/80 px-4 py-2 active:opacity-80">
               <Text className="text-xs font-bold text-slate-300">
                 {shortenAddress(walletAddress)} • Disconnect
               </Text>
@@ -350,15 +316,16 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
           ) : null}
         </View>
 
-        <Text 
-          className="text-5xl font-black tracking-widest text-white italic"
-          style={{ textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 4 }, textShadowRadius: 10 }}
-        >
+        <Text
+          className="text-5xl font-black italic tracking-widest text-white"
+          style={{
+            textShadowColor: 'rgba(0,0,0,0.5)',
+            textShadowOffset: { width: 0, height: 4 },
+            textShadowRadius: 10,
+          }}>
           {copy.headline.toUpperCase()}
         </Text>
-        <Text className="mt-4 max-w-sm text-sm leading-6 text-slate-400">
-          {copy.subtitle}
-        </Text>
+        <Text className="mt-4 max-w-sm text-sm leading-6 text-slate-400">{copy.subtitle}</Text>
 
         <View className="mt-10 gap-4">
           {flatTiers.map(({ token, tier }) => {
@@ -370,17 +337,24 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
                   setSelectedTokenId(token.id);
                   setSelectedTierId(tier.id);
                 }}
-                className={`flex-row items-center justify-between rounded-2xl border px-6 py-5 active:scale-[0.98] transition-all ${
-                  isSelected 
-                    ? 'bg-orange-500 border-orange-400 shadow-lg shadow-orange-500/30' 
+                className={`flex-row items-center justify-between rounded-2xl border px-6 py-5 transition-all active:scale-[0.98] ${
+                  isSelected
+                    ? 'border-orange-400 bg-orange-500 shadow-lg shadow-orange-500/30'
                     : 'border-white/5 bg-slate-900/50'
                 }`}>
                 <View>
-                  <Text className={`text-2xl font-black italic tracking-wide ${isSelected ? 'text-white' : 'text-slate-200'}`}>
-                    {tier.amount} <Text className={isSelected ? 'text-orange-200' : 'text-slate-400'}>{token.symbol}</Text>
+                  <Text
+                    className={`text-2xl font-black italic tracking-wide ${isSelected ? 'text-white' : 'text-slate-200'}`}>
+                    {tier.amount}{' '}
+                    <Text className={isSelected ? 'text-orange-200' : 'text-slate-400'}>
+                      {token.symbol}
+                    </Text>
                   </Text>
                   {tier.label ? (
-                    <Text className={`mt-1 text-sm font-medium ${isSelected ? 'text-orange-100/80' : 'text-slate-500'}`}>{tier.label}</Text>
+                    <Text
+                      className={`mt-1 text-sm font-medium ${isSelected ? 'text-orange-100/80' : 'text-slate-500'}`}>
+                      {tier.label}
+                    </Text>
                   ) : null}
                 </View>
                 <View
@@ -393,14 +367,16 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
             );
           })}
           {!loading && flatTiers.length === 0 ? (
-            <View className="bg-slate-900/50 border border-white/5 rounded-2xl p-6 items-center">
-              <Text className="text-sm font-medium text-slate-500 uppercase tracking-widest">No entry options available</Text>
+            <View className="items-center rounded-2xl border border-white/5 bg-slate-900/50 p-6">
+              <Text className="text-sm font-medium uppercase tracking-widest text-slate-500">
+                No entry options available
+              </Text>
             </View>
           ) : null}
         </View>
 
         {purpose === 'single_paid_contest' && !contestId && selectedToken && selectedTier ? (
-          <View className="mt-6 bg-red-950/50 border border-red-500/30 rounded-xl p-4">
+          <View className="mt-6 rounded-xl border border-red-500/30 bg-red-950/50 p-4">
             <Text className="text-sm font-bold text-red-400">
               No live contest is currently open for this entry tier.
             </Text>
@@ -409,7 +385,9 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
 
         {error ? (
           <View className="mt-6 rounded-xl border border-red-400/30 bg-red-500/10 px-5 py-4">
-            <Text className="text-sm font-bold text-red-300 uppercase tracking-wider mb-2">{error.summary}</Text>
+            <Text className="mb-2 text-sm font-bold uppercase tracking-wider text-red-300">
+              {error.summary}
+            </Text>
             {error.details.length > 0 ? (
               <View className="gap-1.5">
                 {error.details.map((detail, index) => (
@@ -425,18 +403,22 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
         <Pressable
           onPress={() => void handlePrimaryAction()}
           disabled={loading || submitting || !selectedToken || !selectedTier || contestUnavailable}
-          className={`mt-10 rounded-[28px] px-6 py-5 active:scale-95 transition-transform ${
+          className={`mt-10 rounded-[28px] px-6 py-5 transition-transform active:scale-95 ${
             loading || submitting || !selectedToken || !selectedTier || contestUnavailable
               ? 'bg-slate-800'
               : 'bg-white'
           }`}
-          style={(!loading && !submitting && selectedToken && selectedTier && !contestUnavailable) ? {
-            shadowColor: '#ffffff',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.2,
-            shadowRadius: 8,
-            elevation: 5,
-          } : undefined}>
+          style={
+            !loading && !submitting && selectedToken && selectedTier && !contestUnavailable
+              ? {
+                  shadowColor: '#ffffff',
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.2,
+                  shadowRadius: 8,
+                  elevation: 5,
+                }
+              : undefined
+          }>
           <Text
             className={`text-center text-xl font-black uppercase italic tracking-widest ${
               loading || submitting || !selectedToken || !selectedTier || contestUnavailable
@@ -450,8 +432,6 @@ export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSet
     </View>
   );
 };
-
-import { StyleSheet } from 'react-native';
 const styles = StyleSheet.create({
   container: {
     flex: 1,

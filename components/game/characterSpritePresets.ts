@@ -1,4 +1,9 @@
-import { DEFAULT_CHARACTER_ID, type CharacterId } from '../../shared/characters';
+import {
+  DEFAULT_CHARACTER_ID,
+  isPresetCharacterId,
+  type CharacterId,
+  type PresetCharacterId,
+} from '../../shared/characters';
 
 export type SpriteFrame = { x: number; y: number; width: number; height: number };
 
@@ -13,7 +18,7 @@ export type CharacterSpritePreset = {
 };
 
 export type CharacterDefinition = {
-  id: CharacterId;
+  id: PresetCharacterId;
   displayName: string;
   previewOrder: number;
   spritePreset: CharacterSpritePreset;
@@ -155,27 +160,24 @@ export const CHARACTER_DEFINITIONS: readonly CharacterDefinition[] = [
   },
 ] as const;
 
-export const CHARACTER_DEFINITIONS_BY_ID: Record<CharacterId, CharacterDefinition> =
+export const CHARACTER_DEFINITIONS_BY_ID: Record<PresetCharacterId, CharacterDefinition> =
   CHARACTER_DEFINITIONS.reduce(
     (accumulator, definition) => {
       accumulator[definition.id] = definition;
       return accumulator;
     },
-    {} as Record<CharacterId, CharacterDefinition>
+    {} as Record<PresetCharacterId, CharacterDefinition>
   );
 
-export const getCharacterDefinition = (characterId: CharacterId): CharacterDefinition => {
+export const getCharacterDefinition = (characterId: PresetCharacterId): CharacterDefinition => {
   return CHARACTER_DEFINITIONS_BY_ID[characterId];
 };
 
 export const getCharacterDefinitionOrDefault = (
   characterId: CharacterId | null | undefined | string
 ): CharacterDefinition => {
-  if (
-    characterId &&
-    Object.prototype.hasOwnProperty.call(CHARACTER_DEFINITIONS_BY_ID, characterId)
-  ) {
-    return CHARACTER_DEFINITIONS_BY_ID[characterId as CharacterId];
+  if (isPresetCharacterId(characterId)) {
+    return CHARACTER_DEFINITIONS_BY_ID[characterId];
   }
   return CHARACTER_DEFINITIONS_BY_ID[DEFAULT_CHARACTER_ID];
 };
@@ -186,4 +188,4 @@ export const getCharacterPresetOrDefault = (
   return getCharacterDefinitionOrDefault(characterId).spritePreset;
 };
 
-export { DEFAULT_CHARACTER_ID, type CharacterId };
+export { DEFAULT_CHARACTER_ID, type CharacterId, type PresetCharacterId };

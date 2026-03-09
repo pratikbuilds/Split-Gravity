@@ -7,6 +7,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { InteractionManager, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSharedValue } from 'react-native-reanimated';
 import { AppProviders } from 'components/AppProviders';
+import { CharacterGenerationScreen } from 'components/CharacterGenerationScreen';
 import { CharacterSelectScreen } from 'components/CharacterSelectScreen';
 import { GameCanvas } from 'components/GameCanvas';
 import { MultiplayerModeSelectScreen } from 'components/MultiplayerModeSelectScreen';
@@ -24,6 +25,10 @@ import { LobbyScreen } from 'components/multiplayer/LobbyScreen';
 import { SingleModeSelectScreen } from 'components/SingleModeSelectScreen';
 import { WalletDebugScreen } from 'components/wallet/WalletDebugScreen';
 import { DEFAULT_CHARACTER_ID, isCharacterId, type CharacterId } from './shared/characters';
+import type {
+  CustomCharacterSummary,
+  CustomCharacterVersionSummary,
+} from './shared/character-generation-contracts';
 import { backendApi } from './services/backend/api';
 import { getRandomBackgroundIndex } from './utils/backgrounds';
 import type {
@@ -57,6 +62,7 @@ import './global.css';
 
 const TERRAIN_THEMES: TerrainTheme[] = ['grass', 'purple', 'stone'];
 const SELECTED_CHARACTER_STORAGE_KEY = 'my-expo-app:selected-character-id';
+const SELECTED_CUSTOM_CHARACTER_STORAGE_KEY = 'my-expo-app:selected-custom-character';
 
 function getRandomTerrainTheme(previousTheme?: TerrainTheme): TerrainTheme {
   if (TERRAIN_THEMES.length === 1) return TERRAIN_THEMES[0];
@@ -83,10 +89,9 @@ const buildPostPaymentHandoff = (result: PaidSetupResult): PostPaymentHandoff =>
         kind: 'single_paid_contest',
         eyebrow: 'Payment Received',
         title: 'Your Run Is Locked In',
-        subtitle:
-          result.selection.contest?.title
-            ? `${result.selection.contest.title} is ready for you. Take a breath, then launch when you are ready.`
-            : 'Your paid contest entry is secured. Take a breath, then launch when you are ready.',
+        subtitle: result.selection.contest?.title
+          ? `${result.selection.contest.title} is ready for you. Take a breath, then launch when you are ready.`
+          : 'Your paid contest entry is secured. Take a breath, then launch when you are ready.',
         primaryActionLabel: 'Start Run',
         primaryHelperText:
           'We will open your contest run only after you tap start. Until then, this entry stays refundable.',
@@ -104,7 +109,8 @@ const buildPostPaymentHandoff = (result: PaidSetupResult): PostPaymentHandoff =>
         primaryHelperText:
           'Next you will choose your room flow and ready up once both players are funded.',
         refundLabel: 'Refund Stake',
-        refundHelperText: 'If the duel is off, back out now and reclaim the entry before the match starts.',
+        refundHelperText:
+          'If the duel is off, back out now and reclaim the entry before the match starts.',
       };
     case 'multi_paid_queue':
       return {
@@ -120,6 +126,8 @@ const buildPostPaymentHandoff = (result: PaidSetupResult): PostPaymentHandoff =>
         refundHelperText: 'Need to step away? Refund now before you enter matchmaking.',
       };
   }
+
+  throw new Error(`Unsupported post-payment purpose: ${String(result.selection.purpose)}`);
 };
 
 const getErrorMessage = (error: unknown, fallback: string) =>
@@ -135,6 +143,10 @@ function AppContent() {
   const [backgroundIndex, setBackgroundIndex] = useState(() => getRandomBackgroundIndex());
   const [terrainTheme, setTerrainTheme] = useState<TerrainTheme>(() => getRandomTerrainTheme());
   const [selectedCharacterId, setSelectedCharacterId] = useState<CharacterId>(DEFAULT_CHARACTER_ID);
+  const [selectedCustomCharacter, setSelectedCustomCharacter] =
+    useState<CustomCharacterSummary | null>(null);
+  const [opponentCustomCharacter, setOpponentCustomCharacter] =
+    useState<CustomCharacterVersionSummary | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
   const [localMultiplayerDeathScore, setLocalMultiplayerDeathScore] = useState<number | null>(null);
@@ -215,10 +227,9 @@ function AppContent() {
     (characterIds: readonly (CharacterId | null | undefined)[]) => {
       const characterAssets = getCharacterAssets(characterIds);
       if (characterAssets.length === 0) return Promise.resolve();
-      return Promise.all([
-        preloadAssets(characterAssets),
-        preloadSkiaImages(characterAssets),
-      ]).then(() => undefined);
+      return Promise.all([preloadAssets(characterAssets), preloadSkiaImages(characterAssets)]).then(
+        () => undefined
+      );
     },
     [preloadAssets]
   );
@@ -297,10 +308,16 @@ function AppContent() {
     const hydrateSelectedCharacter = async () => {
       try {
         const storedCharacterId = await AsyncStorage.getItem(SELECTED_CHARACTER_STORAGE_KEY);
+        const storedCustomCharacter = await AsyncStorage.getItem(
+          SELECTED_CUSTOM_CHARACTER_STORAGE_KEY
+        );
         if (!active || !storedCharacterId) return;
 
         if (isCharacterId(storedCharacterId)) {
           setSelectedCharacterId(storedCharacterId);
+          if (storedCharacterId === 'custom' && storedCustomCharacter) {
+            setSelectedCustomCharacter(JSON.parse(storedCustomCharacter) as CustomCharacterSummary);
+          }
           return;
         }
 
@@ -348,6 +365,71 @@ function AppContent() {
     multiplayerState.opponent?.characterId,
     preloadCharacters,
   ]);
+
+  useEffect(() => {
+    let active = true;
+    if (selectedCharacterId !== 'custom' || !selectedCustomCharacter?.activeVersionId) return;
+
+    void backendApi
+      .getCustomCharacterVersion(selectedCustomCharacter.activeVersionId)
+      .then(async (response) => {
+        if (!active) return;
+        const refreshedCharacter: CustomCharacterSummary = {
+          characterId: response.version.characterId,
+          displayName: response.version.displayName,
+          activeVersionId: response.version.versionId,
+          asset: response.version.asset,
+          createdAt: response.version.createdAt,
+          updatedAt: response.version.createdAt,
+          isActive: true,
+        };
+        setSelectedCustomCharacter(refreshedCharacter);
+        await AsyncStorage.setItem(
+          SELECTED_CUSTOM_CHARACTER_STORAGE_KEY,
+          JSON.stringify(refreshedCharacter)
+        );
+      })
+      .catch((error) => {
+        if (active) {
+          console.warn('Refreshing selected custom character failed:', error);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedCharacterId, selectedCustomCharacter?.activeVersionId]);
+
+  useEffect(() => {
+    let active = true;
+    const versionId =
+      multiplayerState.opponent?.characterId === 'custom'
+        ? multiplayerState.opponent.customCharacterVersionId
+        : null;
+
+    if (!versionId) {
+      setOpponentCustomCharacter(null);
+      return;
+    }
+
+    void backendApi
+      .getCustomCharacterVersion(versionId)
+      .then((response) => {
+        if (active) {
+          setOpponentCustomCharacter(response.version);
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          console.warn('Loading opponent custom character failed:', error);
+          setOpponentCustomCharacter(null);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [multiplayerState.opponent?.characterId, multiplayerState.opponent?.customCharacterVersionId]);
 
   useEffect(() => {
     if (screen !== 'character_select') return;
@@ -523,20 +605,42 @@ function AppContent() {
     setScreen('character_select');
   }, []);
 
+  const handleOpenCharacterGenerator = useCallback(() => {
+    setScreen('character_generate');
+  }, []);
+
   const handleReturnHome = useCallback(() => {
     singlePlayLaunchRequestRef.current += 1;
     setScreen('home');
   }, []);
 
-  const handleConfirmCharacter = useCallback(async (characterId: CharacterId) => {
-    setSelectedCharacterId(characterId);
-    setScreen('home');
-    try {
-      await AsyncStorage.setItem(SELECTED_CHARACTER_STORAGE_KEY, characterId);
-    } catch (error) {
-      console.warn('Persisting character selection failed:', error);
-    }
-  }, []);
+  const handleConfirmCharacter = useCallback(
+    async ({
+      characterId,
+      customCharacter,
+    }: {
+      characterId: CharacterId;
+      customCharacter?: CustomCharacterSummary | null;
+    }) => {
+      setSelectedCharacterId(characterId);
+      setSelectedCustomCharacter(characterId === 'custom' ? (customCharacter ?? null) : null);
+      setScreen('home');
+      try {
+        await AsyncStorage.setItem(SELECTED_CHARACTER_STORAGE_KEY, characterId);
+        if (characterId === 'custom' && customCharacter) {
+          await AsyncStorage.setItem(
+            SELECTED_CUSTOM_CHARACTER_STORAGE_KEY,
+            JSON.stringify(customCharacter)
+          );
+        } else {
+          await AsyncStorage.removeItem(SELECTED_CUSTOM_CHARACTER_STORAGE_KEY);
+        }
+      } catch (error) {
+        console.warn('Persisting character selection failed:', error);
+      }
+    },
+    []
+  );
 
   const handleExitToHome = () => {
     singlePlayLaunchRequestRef.current += 1;
@@ -571,9 +675,11 @@ function AppContent() {
         tokenId: pendingPaidSession?.selection.token.id,
         entryFeeTierId: pendingPaidSession?.selection.entryFeeTier.id,
         paymentIntentId: pendingPaidSession?.paymentIntentId,
+        customCharacterVersionId:
+          selectedCharacterId === 'custom' ? selectedCustomCharacter?.activeVersionId : undefined,
       });
     },
-    [mode, multiplayerController, pendingPaidSession, selectedCharacterId]
+    [mode, multiplayerController, pendingPaidSession, selectedCharacterId, selectedCustomCharacter]
   );
 
   const handleJoinRoom = useCallback(
@@ -584,9 +690,11 @@ function AppContent() {
         tokenId: pendingPaidSession?.selection.token.id,
         entryFeeTierId: pendingPaidSession?.selection.entryFeeTier.id,
         paymentIntentId: pendingPaidSession?.paymentIntentId,
+        customCharacterVersionId:
+          selectedCharacterId === 'custom' ? selectedCustomCharacter?.activeVersionId : undefined,
       });
     },
-    [mode, multiplayerController, pendingPaidSession, selectedCharacterId]
+    [mode, multiplayerController, pendingPaidSession, selectedCharacterId, selectedCustomCharacter]
   );
 
   const handleReadyRoom = useCallback(() => {
@@ -601,9 +709,11 @@ function AppContent() {
         tokenId: pendingPaidSession.selection.token.id,
         entryFeeTierId: pendingPaidSession.selection.entryFeeTier.id,
         paymentIntentId: pendingPaidSession.paymentIntentId,
+        customCharacterVersionId:
+          selectedCharacterId === 'custom' ? selectedCustomCharacter?.activeVersionId : undefined,
       });
     },
-    [multiplayerController, pendingPaidSession, selectedCharacterId]
+    [multiplayerController, pendingPaidSession, selectedCharacterId, selectedCustomCharacter]
   );
 
   const handleLeavePaidQueue = useCallback(() => {
@@ -829,6 +939,7 @@ function AppContent() {
         {screen === 'home' ? (
           <HomeScreen
             selectedCharacterId={selectedCharacterId}
+            selectedCustomCharacter={selectedCustomCharacter}
             onSinglePlay={openSingleModeSelect}
             onMultiplay={handleMultiplay}
             onOpenCharacterSelect={handleOpenCharacterSelect}
@@ -837,15 +948,27 @@ function AppContent() {
           />
         ) : null}
 
-        {screen === 'leaderboard' ? (
-          <LeaderboardScreen onBack={handleReturnHome} />
-        ) : null}
+        {screen === 'leaderboard' ? <LeaderboardScreen onBack={handleReturnHome} /> : null}
 
         {screen === 'character_select' ? (
           <CharacterSelectScreen
             selectedCharacterId={selectedCharacterId}
+            selectedCustomCharacter={selectedCustomCharacter}
             onBack={handleReturnHome}
+            onOpenGenerator={handleOpenCharacterGenerator}
             onConfirm={handleConfirmCharacter}
+          />
+        ) : null}
+
+        {screen === 'character_generate' ? (
+          <CharacterGenerationScreen
+            onBack={() => setScreen('character_select')}
+            onUseCharacter={(character) => {
+              void handleConfirmCharacter({
+                characterId: 'custom',
+                customCharacter: character,
+              });
+            }}
           />
         ) : null}
 
@@ -916,8 +1039,12 @@ function AppContent() {
               terrainTheme={terrainTheme}
               initialGravityDirection={localInitialGravityDirection}
               characterId={selectedCharacterId}
+              characterCustomSpriteUrl={selectedCustomCharacter?.asset.sheetUrl}
               opponentCharacterId={
                 mode.startsWith('multi_') ? multiplayerState.opponent?.characterId : undefined
+              }
+              opponentCustomSpriteUrl={
+                mode.startsWith('multi_') ? opponentCustomCharacter?.asset.sheetUrl : undefined
               }
               opponentInitialGravityDirection={opponentInitialGravityDirection}
               opponentSnapshotValue={mode.startsWith('multi_') ? opponentSnapshotValue : undefined}

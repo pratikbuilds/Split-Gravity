@@ -151,6 +151,7 @@ export class MultiplayerMatchController {
           nickname: this.state.localPlayer.nickname,
           clientId: this.clientId,
           characterId: this.state.localPlayer.characterId,
+          customCharacterVersionId: this.state.localPlayer.customCharacterVersionId,
         });
       }
     });
@@ -416,6 +417,7 @@ export class MultiplayerMatchController {
       tokenId?: string;
       entryFeeTierId?: string;
       paymentIntentId?: string;
+      customCharacterVersionId?: string;
     }
   ) {
     const safeNickname = nickname.trim() || 'Player 1';
@@ -423,6 +425,7 @@ export class MultiplayerMatchController {
       nickname: safeNickname,
       clientId: this.clientId,
       characterId,
+      customCharacterVersionId: options?.customCharacterVersionId,
       accessToken: options?.accessToken,
       roomKind: options?.roomKind,
       tokenId: options?.tokenId,
@@ -472,6 +475,7 @@ export class MultiplayerMatchController {
       tokenId?: string;
       entryFeeTierId?: string;
       paymentIntentId?: string;
+      customCharacterVersionId?: string;
     }
   ) {
     const safeNickname = nickname.trim() || 'Player';
@@ -481,6 +485,7 @@ export class MultiplayerMatchController {
       nickname: safeNickname,
       clientId: this.clientId,
       characterId,
+      customCharacterVersionId: options?.customCharacterVersionId,
       accessToken: options?.accessToken,
       roomKind: options?.roomKind,
       tokenId: options?.tokenId,
@@ -528,12 +533,14 @@ export class MultiplayerMatchController {
       tokenId: string;
       entryFeeTierId: string;
       paymentIntentId: string;
+      customCharacterVersionId?: string;
     }
   ) {
     const payload: QueueJoinPayload = {
       nickname: nickname.trim() || 'Player',
       clientId: this.clientId,
       characterId,
+      customCharacterVersionId: options.customCharacterVersionId,
       accessToken: options.accessToken,
       tokenId: options.tokenId,
       entryFeeTierId: options.entryFeeTierId,

@@ -2,6 +2,7 @@ import type { Connection, Keypair } from '@solana/web3.js';
 import type {
   ConfirmPaymentIntentRequest,
   ContestEntryRequest,
+  PaymentIntentPurpose,
   PaymentIntentRequest,
   PaymentIntentTransactionRequest,
   SubmitRunResultRequest,
@@ -319,6 +320,26 @@ export class PaymentService {
     });
     await this.persistPaymentState();
     return refund;
+  }
+
+  async assertPaymentIntentForPurpose(
+    accessToken: string | undefined,
+    paymentIntentId: string,
+    purpose: PaymentIntentPurpose
+  ) {
+    await this.ensureInitialized();
+    const session = this.requireSession(accessToken);
+    const intent = this.store.getPaymentIntent(paymentIntentId);
+    if (!intent || intent.playerId !== session.playerId) {
+      throw new Error('Payment intent not found.');
+    }
+    if (intent.purpose !== purpose) {
+      throw new Error('Payment intent purpose does not match this action.');
+    }
+    if (intent.status !== 'confirmed') {
+      throw new Error('Payment intent must be confirmed before continuing.');
+    }
+    return intent;
   }
 
   async createContestEntry(

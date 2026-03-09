@@ -7,6 +7,7 @@ import { useSkiaImageAsset } from '../game/skiaImageCache';
 
 type CharacterSpritePreviewProps = {
   characterId?: CharacterId;
+  sheetUrl?: string | null;
   size?: number;
   frameIntervalMs?: number;
   backgroundColor?: string;
@@ -15,18 +16,30 @@ type CharacterSpritePreviewProps = {
 export const CharacterSpritePreview = memo(
   ({
     characterId,
+    sheetUrl,
     size = 220,
     frameIntervalMs = 220,
     backgroundColor = '#111827',
   }: CharacterSpritePreviewProps) => {
     const preset = getCharacterPresetOrDefault(characterId);
-    const image = useSkiaImageAsset(preset.imageSource);
-    const idleFrames = preset.actions.idle;
+    const image = useSkiaImageAsset(sheetUrl ?? preset.imageSource);
     const [frameIndex, setFrameIndex] = useState(0);
 
     useEffect(() => {
       setFrameIndex(0);
-    }, [characterId]);
+    }, [characterId, sheetUrl]);
+
+    const idleFrames = useMemo(() => {
+      if (!sheetUrl || !image) {
+        return preset.actions.idle;
+      }
+
+      const cellWidth = Math.floor(image.width() / 6);
+      const cellHeight = Math.floor(image.height() / 3);
+      return Array.from({ length: 6 }, (_, index) =>
+        rect(index * cellWidth, cellHeight * 2, cellWidth, cellHeight)
+      );
+    }, [image, preset.actions.idle, sheetUrl]);
 
     useEffect(() => {
       const timer = setInterval(() => {

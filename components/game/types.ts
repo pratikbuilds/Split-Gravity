@@ -22,7 +22,9 @@ export type GameCanvasProps = {
   terrainTheme?: TerrainTheme;
   initialGravityDirection?: GravityDirection;
   characterId?: CharacterId;
+  characterCustomSpriteUrl?: string | null;
   opponentCharacterId?: CharacterId;
+  opponentCustomSpriteUrl?: string | null;
   opponentInitialGravityDirection?: GravityDirection;
   opponentSnapshotValue?: SharedValue<OpponentSnapshot | null>;
   opponentConnectionState?: 'connected' | 'reconnecting' | 'forfeit_pending';

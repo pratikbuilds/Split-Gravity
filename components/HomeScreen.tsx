@@ -3,12 +3,14 @@ import { Pressable, ScrollView, Text, View, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import type { CharacterId } from '../shared/characters';
+import type { CustomCharacterSummary } from '../shared/character-generation-contracts';
 import { CharacterSpritePreview } from './character/CharacterSpritePreview';
 import { getCharacterDefinitionOrDefault } from './game/characterSpritePresets';
 import { WalletStatusChip } from './wallet/WalletStatusChip';
 
 type HomeScreenProps = {
   selectedCharacterId: CharacterId;
+  selectedCustomCharacter?: CustomCharacterSummary | null;
   onSinglePlay: () => void;
   onMultiplay: () => void;
   onOpenCharacterSelect: () => void;
@@ -18,6 +20,7 @@ type HomeScreenProps = {
 
 export const HomeScreen = ({
   selectedCharacterId,
+  selectedCustomCharacter,
   onSinglePlay,
   onMultiplay,
   onOpenCharacterSelect,
@@ -31,6 +34,10 @@ export const HomeScreen = ({
   }, []);
 
   const selectedCharacter = getCharacterDefinitionOrDefault(selectedCharacterId);
+  const selectedCharacterName =
+    selectedCharacterId === 'custom'
+      ? selectedCustomCharacter?.displayName ?? 'Custom Runner'
+      : selectedCharacter.displayName;
 
   return (
     <View style={styles.container}>
@@ -77,13 +84,14 @@ export const HomeScreen = ({
           {/* Hero Character - positioned to interact dynamically with the title */}
           <View className="items-center z-20 my-4" style={{ transform: [{ scale: 1.05 }] }}>
             <CharacterSpritePreview 
-              characterId={selectedCharacter.id} 
+              characterId={selectedCharacterId === 'custom' ? undefined : selectedCharacter.id}
+              sheetUrl={selectedCustomCharacter?.asset.sheetUrl}
               size={260} 
               backgroundColor="rgba(255,255,255,0.03)" 
             />
             <View className="bg-black/40 px-4 py-1.5 rounded-full mt-4 border border-white/10">
               <Text className="text-sm font-bold text-orange-200 tracking-wider uppercase">
-                {selectedCharacter.displayName}
+                {selectedCharacterName}
               </Text>
             </View>
           </View>

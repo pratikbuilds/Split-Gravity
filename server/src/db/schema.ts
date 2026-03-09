@@ -36,6 +36,7 @@ export const paymentIntentPurposeEnum = pgEnum('payment_intent_purpose', [
   'single_paid_contest',
   'multi_paid_private',
   'multi_paid_queue',
+  'character_generation',
 ]);
 export const paymentIntentStatusEnum = pgEnum('payment_intent_status', [
   'pending',
@@ -60,6 +61,17 @@ export const withdrawalStatusEnum = pgEnum('withdrawal_status', [
   'confirmed',
   'failed',
 ]);
+export const characterGenerationSourceTypeEnum = pgEnum('character_generation_source_type', [
+  'prompt',
+  'image',
+]);
+export const characterGenerationJobStatusEnum = pgEnum('character_generation_job_status', [
+  'queued',
+  'running',
+  'succeeded',
+  'failed',
+  'refunded',
+]);
 
 export const players = pgTable(
   'players',
@@ -72,6 +84,70 @@ export const players = pgTable(
   },
   (table) => ({
     walletAddressIdx: uniqueIndex('players_wallet_address_idx').on(table.walletAddress),
+  })
+);
+
+export const customCharacters = pgTable('custom_characters', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  playerId: uuid('player_id').notNull(),
+  displayName: varchar('display_name', { length: 64 }).notNull(),
+  archivedAt: timestamp('archived_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const playerActiveCharacters = pgTable('player_active_characters', {
+  playerId: uuid('player_id').primaryKey(),
+  characterId: varchar('character_id', { length: 32 }).notNull(),
+  customCharacterVersionId: uuid('custom_character_version_id'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const characterGenerationJobs = pgTable('character_generation_jobs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  playerId: uuid('player_id').notNull(),
+  sourceType: characterGenerationSourceTypeEnum('source_type').notNull(),
+  displayName: varchar('display_name', { length: 64 }),
+  prompt: text('prompt'),
+  referenceImageDataUrl: text('reference_image_data_url'),
+  paymentIntentId: uuid('payment_intent_id').references(() => paymentIntents.id),
+  status: characterGenerationJobStatusEnum('status').default('queued').notNull(),
+  failureMessage: text('failure_message'),
+  resultCharacterId: uuid('result_character_id').references(() => customCharacters.id),
+  resultVersionId: uuid('result_version_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+});
+
+export const customCharacterVersions = pgTable('custom_character_versions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  customCharacterId: uuid('custom_character_id')
+    .references(() => customCharacters.id)
+    .notNull(),
+  generationJobId: uuid('generation_job_id').references(() => characterGenerationJobs.id),
+  sheetObjectKey: text('sheet_object_key').notNull(),
+  thumbnailObjectKey: text('thumbnail_object_key'),
+  width: integer('width').notNull(),
+  height: integer('height').notNull(),
+  gridColumns: integer('grid_columns').default(6).notNull(),
+  gridRows: integer('grid_rows').default(3).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const playerPushTokens = pgTable(
+  'player_push_tokens',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    playerId: uuid('player_id').notNull(),
+    expoPushToken: varchar('expo_push_token', { length: 256 }).notNull(),
+    platform: varchar('platform', { length: 16 }).notNull(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    tokenIdx: uniqueIndex('player_push_tokens_token_idx').on(table.expoPushToken),
   })
 );
 

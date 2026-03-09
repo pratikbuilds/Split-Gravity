@@ -76,7 +76,8 @@ export interface WalletVerifyResponse {
 export type PaymentIntentPurpose =
   | 'single_paid_contest'
   | 'multi_paid_private'
-  | 'multi_paid_queue';
+  | 'multi_paid_queue'
+  | 'character_generation';
 
 export interface PaymentIntentRequest {
   tokenId: SupportedTokenId;
