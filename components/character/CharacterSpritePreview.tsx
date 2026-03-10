@@ -11,6 +11,7 @@ type CharacterSpritePreviewProps = {
   size?: number;
   frameIntervalMs?: number;
   backgroundColor?: string;
+  previewMode?: 'default' | 'jobCard';
 };
 
 export const CharacterSpritePreview = memo(
@@ -20,6 +21,7 @@ export const CharacterSpritePreview = memo(
     size = 220,
     frameIntervalMs = 220,
     backgroundColor = '#111827',
+    previewMode = 'default',
   }: CharacterSpritePreviewProps) => {
     const preset = getCharacterPresetOrDefault(characterId);
     const image = useSkiaImageAsset(sheetUrl ?? preset.imageSource);
@@ -79,21 +81,37 @@ export const CharacterSpritePreview = memo(
       );
     }, [frame.height, frame.width, frame.x, frame.y, image]);
 
-    const spriteRects = useMemo(() => [spriteRect], [spriteRect]);
+    const previewRect = useMemo(() => {
+      if (previewMode !== 'jobCard') {
+        return spriteRect;
+      }
+
+      const portraitWidth = spriteRect.width * 0.78;
+      const portraitHeight = spriteRect.height * 0.52;
+      const portraitX = spriteRect.x + (spriteRect.width - portraitWidth) / 2;
+
+      return rect(portraitX, spriteRect.y, portraitWidth, portraitHeight);
+    }, [previewMode, spriteRect]);
+
+    const spriteRects = useMemo(() => [previewRect], [previewRect]);
 
     const transforms = useRSXformBuffer(1, (value) => {
       'worklet';
-      const horizontalInset = size * 0.1;
-      const topInset = size * 0.11;
-      const bottomInset = size * 0.13;
+      const isJobCard = previewMode === 'jobCard';
+      const horizontalInset = size * (isJobCard ? 0.08 : 0.1);
+      const topInset = size * (isJobCard ? 0.05 : 0.11);
+      const bottomInset = size * (isJobCard ? 0.06 : 0.13);
       const availableWidth = size - horizontalInset * 2;
       const availableHeight = size - topInset - bottomInset;
+      const scaleMultiplier = isJobCard ? 1.08 : 1.01;
       const scale =
-        Math.min(availableWidth / spriteRect.width, availableHeight / spriteRect.height) * 1.01;
-      const renderWidth = spriteRect.width * scale;
-      const renderHeight = spriteRect.height * scale;
+        Math.min(availableWidth / previewRect.width, availableHeight / previewRect.height) *
+        scaleMultiplier;
+      const renderWidth = previewRect.width * scale;
+      const renderHeight = previewRect.height * scale;
       const x = (size - renderWidth) / 2;
-      const y = topInset + (availableHeight - renderHeight) / 2;
+      const verticalBias = isJobCard ? -size * 0.02 : 0;
+      const y = topInset + (availableHeight - renderHeight) / 2 + verticalBias;
       value.set(scale, 0, x, y);
     });
 

@@ -27,11 +27,12 @@ export const GenerationJobCard = ({ job, onUseCharacter }: GenerationJobCardProp
             {STATUS_COPY[job.status]}
           </Text>
         </View>
-        {job.result?.asset.thumbnailUrl ? (
+        {job.result?.asset.sheetUrl ? (
           <CharacterSpritePreview
-            sheetUrl={job.result.asset.thumbnailUrl}
+            sheetUrl={job.result.asset.sheetUrl}
             size={92}
             backgroundColor="rgba(255,255,255,0.04)"
+            previewMode="jobCard"
           />
         ) : null}
       </View>

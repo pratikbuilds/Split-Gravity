@@ -6,7 +6,7 @@ import {
   RefreshControl,
   Text,
   View,
-  StyleSheet
+  StyleSheet,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ScreenOrientation from 'expo-screen-orientation';
@@ -212,9 +212,7 @@ export const LeaderboardScreen = ({ onBack }: LeaderboardScreenProps) => {
               </Text>
             </View>
             <View style={{ flex: 1 }}>
-              <Text
-                numberOfLines={1}
-                style={{ fontSize: 16, fontWeight: '700', color: '#f1f5f9' }}>
+              <Text numberOfLines={1} style={{ fontSize: 16, fontWeight: '700', color: '#f1f5f9' }}>
                 {displayName}
               </Text>
               <Text style={{ fontSize: 13, color: '#94a3b8', marginTop: 2 }}>
@@ -222,11 +220,9 @@ export const LeaderboardScreen = ({ onBack }: LeaderboardScreenProps) => {
               </Text>
             </View>
             <View style={{ alignItems: 'flex-end' }}>
-              <Text style={{ fontSize: 18, fontWeight: '800', color: '#fbbf24', fontStyle: 'italic' }}>
+              <Text
+                style={{ fontSize: 18, fontWeight: '800', color: '#fbbf24', fontStyle: 'italic' }}>
                 {item.bestDistance}m
-              </Text>
-              <Text style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
-                {payoutDisplay}
               </Text>
             </View>
           </View>
@@ -245,17 +241,21 @@ export const LeaderboardScreen = ({ onBack }: LeaderboardScreenProps) => {
   if (loading && contests.length === 0) {
     return (
       <View style={styles.container}>
-        <View style={StyleSheet.absoluteFill} pointerEvents="none"><View style={styles.splitDiagonal} /></View>
-        
-        <View className="flex-1 z-10" style={contentPadding}>
-          <View className="items-center justify-center flex-1">
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          <View style={styles.splitDiagonal} />
+        </View>
+
+        <View className="z-10 flex-1" style={contentPadding}>
+          <View className="flex-1 items-center justify-center">
             <ActivityIndicator color="#ea580c" size="large" />
-            <Text className="mt-4 text-slate-400 font-bold uppercase tracking-widest">Loading...</Text>
+            <Text className="mt-4 font-bold uppercase tracking-widest text-slate-400">
+              Loading...
+            </Text>
           </View>
           <Pressable
             onPress={onBack}
-            className="self-start rounded-full bg-white/5 border border-white/10 px-6 py-3 active:bg-white/10 transition-colors">
-            <Text className="font-bold text-slate-300 uppercase tracking-wider text-sm">Back</Text>
+            className="self-start rounded-full border border-white/10 bg-white/5 px-6 py-3 transition-colors active:bg-white/10">
+            <Text className="text-sm font-bold uppercase tracking-wider text-slate-300">Back</Text>
           </Pressable>
         </View>
       </View>
@@ -265,21 +265,29 @@ export const LeaderboardScreen = ({ onBack }: LeaderboardScreenProps) => {
   if (contests.length === 0) {
     return (
       <View style={styles.container}>
-        <View style={StyleSheet.absoluteFill} pointerEvents="none"><View style={styles.splitDiagonal} /></View>
-        
-        <View className="flex-1 z-10" style={contentPadding}>
-          <Text className="text-5xl font-black tracking-widest text-white italic" style={{ textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 4 }, textShadowRadius: 10 }}>
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          <View style={styles.splitDiagonal} />
+        </View>
+
+        <View className="z-10 flex-1" style={contentPadding}>
+          <Text
+            className="text-5xl font-black italic tracking-widest text-white"
+            style={{
+              textShadowColor: 'rgba(0,0,0,0.5)',
+              textShadowOffset: { width: 0, height: 4 },
+              textShadowRadius: 10,
+            }}>
             RANKINGS
           </Text>
           <View className="flex-1 items-center justify-center">
-            <Text className="text-center text-slate-400 text-base">
+            <Text className="text-center text-base text-slate-400">
               No active contest. Check back later.
             </Text>
           </View>
           <Pressable
             onPress={onBack}
-            className="self-start rounded-full bg-white/5 border border-white/10 px-6 py-3 active:bg-white/10 transition-colors">
-            <Text className="font-bold text-slate-300 uppercase tracking-wider text-sm">Back</Text>
+            className="self-start rounded-full border border-white/10 bg-white/5 px-6 py-3 transition-colors active:bg-white/10">
+            <Text className="text-sm font-bold uppercase tracking-wider text-slate-300">Back</Text>
           </Pressable>
         </View>
       </View>
@@ -288,28 +296,47 @@ export const LeaderboardScreen = ({ onBack }: LeaderboardScreenProps) => {
 
   return (
     <View style={styles.container}>
-      <View style={StyleSheet.absoluteFill} pointerEvents="none"><View style={styles.splitDiagonal} /></View>
-      
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        <View style={styles.splitDiagonal} />
+      </View>
 
-      <View className="flex-1 z-10">
+      <View className="z-10 flex-1">
         <View style={[contentPadding, { paddingBottom: 0 }]}>
-          <View className="flex-row items-center justify-between mb-4">
+          <View className="mb-4 flex-row items-center justify-between">
             <Pressable
               onPress={onBack}
-              className="rounded-full bg-white/5 border border-white/10 px-6 py-2.5 active:bg-white/10 transition-colors">
-              <Text className="font-bold text-slate-300 uppercase tracking-wider text-sm">Back</Text>
+              className="rounded-full border border-white/10 bg-white/5 px-6 py-2.5 transition-colors active:bg-white/10">
+              <Text className="text-sm font-bold uppercase tracking-wider text-slate-300">
+                Back
+              </Text>
             </Pressable>
           </View>
-          <Text className="text-5xl font-black tracking-widest text-white italic" style={{ textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 4 }, textShadowRadius: 10 }}>
+          <Text
+            className="text-5xl font-black italic tracking-widest text-white"
+            style={{
+              textShadowColor: 'rgba(0,0,0,0.5)',
+              textShadowOffset: { width: 0, height: 4 },
+              textShadowRadius: 10,
+            }}>
             RANKINGS
           </Text>
           {selectedContest && (
             <>
-              <Text className="mt-2 text-sm text-orange-200/80 font-bold uppercase tracking-wider">{selectedContest.title}</Text>
+              <Text className="mt-2 text-sm font-bold uppercase tracking-wider text-orange-200/80">
+                {selectedContest.title}
+              </Text>
               {selectedContest.endsAt && (
                 <View className="mt-3 flex-row items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5">
-                  <Text className="text-xs font-bold uppercase tracking-wider text-amber-200/90">Time left</Text>
-                  <Text className="font-mono text-lg font-black tabular-nums text-amber-400" style={{ textShadowColor: 'rgba(251,191,36,0.3)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 8 }}>
+                  <Text className="text-xs font-bold uppercase tracking-wider text-amber-200/90">
+                    Time left
+                  </Text>
+                  <Text
+                    className="font-mono text-lg font-black tabular-nums text-amber-400"
+                    style={{
+                      textShadowColor: 'rgba(251,191,36,0.3)',
+                      textShadowOffset: { width: 0, height: 0 },
+                      textShadowRadius: 8,
+                    }}>
                     {getTimeLeft(selectedContest.endsAt, Date.now())}
                   </Text>
                 </View>
@@ -330,10 +357,12 @@ export const LeaderboardScreen = ({ onBack }: LeaderboardScreenProps) => {
             </View>
           )}
           {error && (
-            <View className="mt-4 rounded-xl bg-red-900/30 border border-red-500/40 px-4 py-3">
-              <Text className="text-red-300 text-sm">{error}</Text>
+            <View className="mt-4 rounded-xl border border-red-500/40 bg-red-900/30 px-4 py-3">
+              <Text className="text-sm text-red-300">{error}</Text>
               <Pressable onPress={refresh} className="mt-2 self-start">
-                <Text className="text-orange-300 font-bold uppercase tracking-wider text-sm">Retry</Text>
+                <Text className="text-sm font-bold uppercase tracking-wider text-orange-300">
+                  Retry
+                </Text>
               </Pressable>
             </View>
           )}
@@ -341,7 +370,9 @@ export const LeaderboardScreen = ({ onBack }: LeaderboardScreenProps) => {
 
         {leaderboard.length === 0 && !error ? (
           <View className="flex-1 items-center justify-center px-6">
-            <Text className="text-center text-slate-400 text-base">No scores yet. Be the first!</Text>
+            <Text className="text-center text-base text-slate-400">
+              No scores yet. Be the first!
+            </Text>
           </View>
         ) : (
           <FlatList
@@ -355,11 +386,7 @@ export const LeaderboardScreen = ({ onBack }: LeaderboardScreenProps) => {
             }}
             showsVerticalScrollIndicator={false}
             refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={refresh}
-                tintColor="#ea580c"
-              />
+              <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#ea580c" />
             }
           />
         )}
@@ -368,8 +395,10 @@ export const LeaderboardScreen = ({ onBack }: LeaderboardScreenProps) => {
           <View style={{ paddingHorizontal: 24, paddingBottom: Math.max(insets.bottom, 24) }}>
             <Pressable
               onPress={onBack}
-              className="self-start rounded-full bg-white/5 border border-white/10 px-6 py-3 active:bg-white/10 transition-colors">
-              <Text className="font-bold text-slate-300 uppercase tracking-wider text-sm">Back</Text>
+              className="self-start rounded-full border border-white/10 bg-white/5 px-6 py-3 transition-colors active:bg-white/10">
+              <Text className="text-sm font-bold uppercase tracking-wider text-slate-300">
+                Back
+              </Text>
             </Pressable>
           </View>
         )}
