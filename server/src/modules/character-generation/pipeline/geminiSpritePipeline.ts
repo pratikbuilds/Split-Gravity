@@ -2,6 +2,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { env } from '../../../config/env';
 import type { CharacterGenerationSourceType } from '../../../shared/character-generation-contracts';
 import { applyMagentaTransparency, createThumbnail } from './imageProcessing';
+import { analyzeGeneratedSpriteSheet } from './generatedSpriteSheetMetadata';
 
 type GenerateSpriteSheetArgs = {
   prompt: string | null;
@@ -20,7 +21,11 @@ type GridCheckResult = {
   consistentScale: boolean;
   uniformSpacing: boolean;
   noTextOrUi: boolean;
-  runRowNatural: boolean;
+  idleRowBaselineStable: boolean;
+  idleRowPelvisStable: boolean;
+  runRowLegInterchangeClear: boolean;
+  runRowArmSwingVisible: boolean;
+  runRowArcadeSprintReadable: boolean;
 };
 
 const extractFirstJsonObject = (raw: string): string | null => {
@@ -42,6 +47,14 @@ const parseDataUrlImage = (imageBase64: string): { mimeType: string; data: strin
   };
 };
 
+export const buildRetryCorrection = (
+  failedChecks: string[],
+  attempt: number,
+  maxAttempts: number
+) =>
+  `RETRY ${attempt}/${maxAttempts}: Previous output failed checks: ${failedChecks.join(', ')}. ` +
+  'Regenerate from scratch. MUST satisfy all: EXACT 6x3 grid, fixed camera distance across all rows, every frame full-body head-to-feet, IDLE row with both legs and both feet visible in all 6 cells and no portrait/bust crops, idle breathing only above the pelvis, feet planted to one baseline, pelvis locked with no side-to-side drift, consistent scale across all 18 frames, uniform spacing and baseline alignment, zero text/UI artifacts, and a readable arcade sprint run cycle with (1) unmistakable left/right leg interchange, (2) strong opposite arm swing in every frame, (3) clear contact, passing, and push phases, (4) no jump-like or both-feet-up poses, and (5) no foot sliding.';
+
 const inspectSpriteSheetGrid = async (
   ai: GoogleGenAI,
   imageDataUrl: string
@@ -52,7 +65,7 @@ const inspectSpriteSheetGrid = async (
     contents: {
       parts: [
         {
-          text: 'Validate this sprite sheet. Return JSON only with columns, rows, fullBodyAllFrames, idleRowFullBodyAllFrames, idleRowLegsVisibleAllFrames, idleRowNoCloseUpCrop, cameraDistanceStable, consistentScale, uniformSpacing, noTextOrUi, runRowNatural.',
+          text: 'Validate this sprite sheet. Return JSON only with columns, rows, fullBodyAllFrames, idleRowFullBodyAllFrames, idleRowLegsVisibleAllFrames, idleRowNoCloseUpCrop, cameraDistanceStable, consistentScale, uniformSpacing, noTextOrUi, idleRowBaselineStable, idleRowPelvisStable, runRowLegInterchangeClear, runRowArmSwingVisible, runRowArcadeSprintReadable.',
         },
         {
           inlineData: {
@@ -77,7 +90,11 @@ const inspectSpriteSheetGrid = async (
           consistentScale: { type: Type.BOOLEAN },
           uniformSpacing: { type: Type.BOOLEAN },
           noTextOrUi: { type: Type.BOOLEAN },
-          runRowNatural: { type: Type.BOOLEAN },
+          idleRowBaselineStable: { type: Type.BOOLEAN },
+          idleRowPelvisStable: { type: Type.BOOLEAN },
+          runRowLegInterchangeClear: { type: Type.BOOLEAN },
+          runRowArmSwingVisible: { type: Type.BOOLEAN },
+          runRowArcadeSprintReadable: { type: Type.BOOLEAN },
         },
       },
     },
@@ -99,7 +116,11 @@ const inspectSpriteSheetGrid = async (
       consistentScale: parsed.consistentScale === true,
       uniformSpacing: parsed.uniformSpacing === true,
       noTextOrUi: parsed.noTextOrUi === true,
-      runRowNatural: parsed.runRowNatural === true,
+      idleRowBaselineStable: parsed.idleRowBaselineStable === true,
+      idleRowPelvisStable: parsed.idleRowPelvisStable === true,
+      runRowLegInterchangeClear: parsed.runRowLegInterchangeClear === true,
+      runRowArmSwingVisible: parsed.runRowArmSwingVisible === true,
+      runRowArcadeSprintReadable: parsed.runRowArcadeSprintReadable === true,
     };
   } catch {
     return {
@@ -113,12 +134,16 @@ const inspectSpriteSheetGrid = async (
       consistentScale: false,
       uniformSpacing: false,
       noTextOrUi: false,
-      runRowNatural: false,
+      idleRowBaselineStable: false,
+      idleRowPelvisStable: false,
+      runRowLegInterchangeClear: false,
+      runRowArmSwingVisible: false,
+      runRowArcadeSprintReadable: false,
     };
   }
 };
 
-const buildPrompt = (prompt: string | null, sourceType: CharacterGenerationSourceType) => {
+export const buildPrompt = (prompt: string | null, sourceType: CharacterGenerationSourceType) => {
   const subject = prompt?.trim() || 'reference character';
   const referenceLine =
     sourceType === 'image'
@@ -134,9 +159,9 @@ Rules:
 - Background must be flat #FF00FF only.
 - No text, UI, borders, grid lines, logos, or watermark.
 - Keep framing and character scale consistent across all 18 frames.
-- Run row is a readable 6-frame sprint cycle.
+- Run row is a readable exaggerated arcade sprint: obvious left/right leg interchange, clear contact/passing/push phases, and strong opposite arm swing in every frame.
 - Jump row is launch, ascent, peak, descent, landing, recovery.
-- Idle row is subtle breathing only, no stepping.
+- Idle row is subtle breathing only above the pelvis. Feet stay planted to one baseline and the pelvis stays locked with no side-to-side or forward/back drift.
 Return only the final image.`;
 };
 
@@ -197,6 +222,9 @@ export class GeminiSpritePipeline {
       const processedBuffer = applyMagentaTransparency(rawBuffer);
       const processedDataUrl = `data:image/png;base64,${processedBuffer.toString('base64')}`;
       const inspection = await inspectSpriteSheetGrid(this.client, processedDataUrl);
+      const layoutAnalysis = analyzeGeneratedSpriteSheet(processedBuffer);
+      const idlePixelBaselineStable = layoutAnalysis.diagnostics.idleBaselineRange <= 6;
+      const idlePixelCenterStable = layoutAnalysis.diagnostics.idleLowerBodyCenterRange <= 10;
       const isCompliant =
         inspection.columns === 6 &&
         inspection.rows === 3 &&
@@ -208,7 +236,13 @@ export class GeminiSpritePipeline {
         inspection.consistentScale &&
         inspection.uniformSpacing &&
         inspection.noTextOrUi &&
-        inspection.runRowNatural;
+        inspection.idleRowBaselineStable &&
+        inspection.idleRowPelvisStable &&
+        inspection.runRowLegInterchangeClear &&
+        inspection.runRowArmSwingVisible &&
+        inspection.runRowArcadeSprintReadable &&
+        idlePixelBaselineStable &&
+        idlePixelCenterStable;
 
       if (isCompliant) {
         const thumbnailBuffer = await createThumbnail(processedBuffer);
@@ -217,6 +251,7 @@ export class GeminiSpritePipeline {
           thumbnailBuffer,
           width: 2048,
           height: 1152,
+          animation: layoutAnalysis.animation,
         };
       }
 
@@ -236,17 +271,31 @@ export class GeminiSpritePipeline {
       if (!inspection.idleRowNoCloseUpCrop) {
         failedChecks.push('idle row no close-up/bust/portrait crop');
       }
+      if (!inspection.idleRowBaselineStable) {
+        failedChecks.push('idle row feet locked to one baseline');
+      }
+      if (!inspection.idleRowPelvisStable) {
+        failedChecks.push('idle row pelvis locked in place');
+      }
       if (!inspection.cameraDistanceStable) {
         failedChecks.push('stable camera distance across rows');
       }
       if (!inspection.consistentScale) failedChecks.push('consistent character scale');
       if (!inspection.uniformSpacing) failedChecks.push('uniform cell spacing/alignment');
       if (!inspection.noTextOrUi) failedChecks.push('no text/UI artifacts');
-      if (!inspection.runRowNatural) failedChecks.push('natural run cycle readability');
+      if (!inspection.runRowLegInterchangeClear) {
+        failedChecks.push('clear run-row leg interchange');
+      }
+      if (!inspection.runRowArmSwingVisible) {
+        failedChecks.push('visible run-row arm swing');
+      }
+      if (!inspection.runRowArcadeSprintReadable) {
+        failedChecks.push('arcade sprint readability');
+      }
+      if (!idlePixelBaselineStable) failedChecks.push('pixel-detected idle baseline drift');
+      if (!idlePixelCenterStable) failedChecks.push('pixel-detected idle pelvis drift');
 
-      correction =
-        `RETRY ${attempt}/${maxAttempts}: Previous output failed checks: ${failedChecks.join(', ')}. ` +
-        'Regenerate from scratch. MUST satisfy all: EXACT 6x3 grid, fixed camera distance across all rows, every frame full-body head-to-feet, IDLE row with both legs and both feet visible in all 6 cells and no portrait/bust crops, consistent scale across all 18 frames, uniform spacing and baseline alignment, zero text/UI artifacts, and a natural run cycle with (1) at least one foot on ground in contact/down frames—no floating, (2) visible arm swing every frame—no stiff arms, (3) leg poses that read as run not jump—no pouncing or both-feet-up, (4) no foot sliding.';
+      correction = buildRetryCorrection(failedChecks, attempt, maxAttempts);
     }
 
     throw new Error('Unable to generate a compliant 6x3 sprite sheet after multiple attempts.');

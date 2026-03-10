@@ -1040,11 +1040,15 @@ function AppContent() {
               initialGravityDirection={localInitialGravityDirection}
               characterId={selectedCharacterId}
               characterCustomSpriteUrl={selectedCustomCharacter?.asset.sheetUrl}
+              characterCustomSpriteAnimation={selectedCustomCharacter?.asset.animation}
               opponentCharacterId={
                 mode.startsWith('multi_') ? multiplayerState.opponent?.characterId : undefined
               }
               opponentCustomSpriteUrl={
                 mode.startsWith('multi_') ? opponentCustomCharacter?.asset.sheetUrl : undefined
+              }
+              opponentCustomSpriteAnimation={
+                mode.startsWith('multi_') ? opponentCustomCharacter?.asset.animation : undefined
               }
               opponentInitialGravityDirection={opponentInitialGravityDirection}
               opponentSnapshotValue={mode.startsWith('multi_') ? opponentSnapshotValue : undefined}

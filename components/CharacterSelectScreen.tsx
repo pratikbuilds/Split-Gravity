@@ -254,6 +254,7 @@ export const CharacterSelectScreen = ({
           <CharacterSpritePreview
             characterId={pendingCharacter?.id}
             sheetUrl={pendingCustomCharacter?.asset.sheetUrl}
+            sheetAnimation={pendingCustomCharacter?.asset.animation}
             size={176}
             backgroundColor="rgba(255,255,255,0.04)"
           />

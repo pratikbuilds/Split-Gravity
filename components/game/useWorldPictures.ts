@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Skia, createPicture, rect, useImage, useRSXformBuffer } from '@shopify/react-native-skia';
 import { useDerivedValue } from 'react-native-reanimated';
+import type { GeneratedSpriteAnimationDescriptor } from '../../shared/character-generation-contracts';
 import type { Platform, TerrainTheme } from '../../types/game';
 import type { CharacterId } from '../../shared/characters';
 import { isSurfaceEdgeGap } from '../../shared/game/terrainAutotile';
@@ -19,6 +20,11 @@ import {
   type CharacterSpritePreset,
   type SpriteFrame,
 } from './characterSpritePresets';
+import {
+  resolveSpriteBasePosition,
+  resolveGeneratedSpriteActions,
+  resolveSpriteReferenceHeight,
+} from './generatedSpriteSheet';
 import { useSkiaImageAsset } from './skiaImageCache';
 import type { SimulationRefs } from './types';
 import { MIDDLE_PLATFORM_ASSETS, TERRAIN_TILE_ASSETS } from './worldAssetSources';
@@ -69,7 +75,7 @@ const resolveRenderMetrics = (
 ) => {
   'worklet';
   const targetRenderHeight = hitboxSize * preset.renderScaleMultiplier * scaleBoost;
-  const scale = targetRenderHeight / frame.height;
+  const scale = targetRenderHeight / resolveSpriteReferenceHeight(frame);
   const feetTrim = preset.feetTrimPx * scale;
   const renderWidth = frame.width * scale;
   const renderHeight = frame.height * scale;
@@ -88,8 +94,10 @@ interface UseWorldPicturesArgs {
   terrainTheme: TerrainTheme;
   characterId?: CharacterId;
   characterCustomSpriteUrl?: string | null;
+  characterCustomSpriteAnimation?: GeneratedSpriteAnimationDescriptor | null;
   opponentCharacterId?: CharacterId;
   opponentCustomSpriteUrl?: string | null;
+  opponentCustomSpriteAnimation?: GeneratedSpriteAnimationDescriptor | null;
   platforms: Platform[];
   refs: Pick<
     SimulationRefs,
@@ -118,40 +126,29 @@ export const useWorldPictures = ({
   terrainTheme,
   characterId,
   characterCustomSpriteUrl,
+  characterCustomSpriteAnimation,
   opponentCharacterId,
   opponentCustomSpriteUrl,
+  opponentCustomSpriteAnimation,
   platforms,
   refs,
 }: UseWorldPicturesArgs) => {
-  const resolveGeneratedPreset = (imageWidth: number, imageHeight: number): CharacterSpritePreset => {
-    const cellWidth = Math.floor(imageWidth / 6);
-    const cellHeight = Math.floor(imageHeight / 3);
-    const rowFrames = (row: number, count = 6): SpriteFrame[] =>
-      Array.from({ length: count }, (_, index) => ({
-        x: cellWidth * index,
-        y: cellHeight * row,
-        width: cellWidth,
-        height: cellHeight,
-      }));
-
-    return {
-      imageSource: 0,
-      renderScaleMultiplier: 1.2,
-      feetTrimPx: 0,
-      frameSlowdowns: {
-        idle: 4,
-        run: 1,
-        jump: 2,
-        fall: 2,
-      },
-      actions: {
-        run: rowFrames(0),
-        jump: rowFrames(1, 3),
-        fall: rowFrames(1).slice(3, 5),
-        idle: rowFrames(2),
-      },
-    };
-  };
+  const resolveGeneratedPreset = (
+    imageWidth: number,
+    imageHeight: number,
+    animation?: GeneratedSpriteAnimationDescriptor | null
+  ): CharacterSpritePreset => ({
+    imageSource: 0,
+    renderScaleMultiplier: 1.2,
+    feetTrimPx: 0,
+    frameSlowdowns: {
+      idle: 4,
+      run: 1,
+      jump: 2,
+      fall: 2,
+    },
+    actions: resolveGeneratedSpriteActions(imageWidth, imageHeight, animation),
+  });
 
   const totalBackgrounds = GAME_BACKGROUNDS.length;
   const safeBackgroundIndex =
@@ -191,16 +188,34 @@ export const useWorldPictures = ({
   );
   const characterPreset = useMemo(() => {
     if (characterCustomSpriteUrl && characterImage) {
-      return resolveGeneratedPreset(characterImage.width(), characterImage.height());
+      return resolveGeneratedPreset(
+        characterImage.width(),
+        characterImage.height(),
+        characterCustomSpriteAnimation
+      );
     }
     return fallbackCharacterPreset;
-  }, [characterCustomSpriteUrl, characterImage, fallbackCharacterPreset]);
+  }, [
+    characterCustomSpriteAnimation,
+    characterCustomSpriteUrl,
+    characterImage,
+    fallbackCharacterPreset,
+  ]);
   const opponentPreset = useMemo(() => {
     if (opponentCustomSpriteUrl && opponentImage) {
-      return resolveGeneratedPreset(opponentImage.width(), opponentImage.height());
+      return resolveGeneratedPreset(
+        opponentImage.width(),
+        opponentImage.height(),
+        opponentCustomSpriteAnimation
+      );
     }
     return fallbackOpponentPreset;
-  }, [fallbackOpponentPreset, opponentCustomSpriteUrl, opponentImage]);
+  }, [
+    fallbackOpponentPreset,
+    opponentCustomSpriteAnimation,
+    opponentCustomSpriteUrl,
+    opponentImage,
+  ]);
 
   const characterTransforms = useRSXformBuffer(1, (val) => {
     'worklet';
@@ -214,19 +229,16 @@ export const useWorldPictures = ({
     const airborne = isAirborne(refs.flipLockedUntilLanding.value, refs.velocityY.value);
     const hitboxSize = CHAR_SIZE * CHAR_SCALE;
     const scaleBoost = airborne ? JUMP_SCALE_BOOST : 1;
-    const { scale, feetTrim, renderWidth, renderHeight } = resolveRenderMetrics(
-      characterPreset,
-      frame,
-      hitboxSize,
-      scaleBoost
-    );
-    const baseX = refs.charX.value + (hitboxSize - renderWidth) / 2;
+    const { scale, feetTrim } = resolveRenderMetrics(characterPreset, frame, hitboxSize, scaleBoost);
     const gDir = refs.gravityDirection.value;
-    const baseY =
-      gDir === -1
-        ? refs.posY.value - feetTrim
-        : refs.posY.value + (hitboxSize - renderHeight) + feetTrim;
-    val.set(scale, 0, baseX, baseY);
+    const { x, y } = resolveSpriteBasePosition({
+      frame,
+      scale,
+      gravityDirection: gDir,
+      worldAnchorX: refs.charX.value + hitboxSize / 2,
+      worldAnchorY: gDir === -1 ? refs.posY.value - feetTrim : refs.posY.value + hitboxSize + feetTrim,
+    });
+    val.set(scale, 0, x, y);
   });
 
   const opponentTransforms = useRSXformBuffer(1, (val) => {
@@ -243,20 +255,20 @@ export const useWorldPictures = ({
       refs.opponentFrameIndex.value
     );
     const hitboxSize = CHAR_SIZE * CHAR_SCALE;
-    const { scale, feetTrim, renderWidth, renderHeight } = resolveRenderMetrics(
-      opponentPreset,
-      frame,
-      hitboxSize,
-      1
-    );
+    const { scale, feetTrim } = resolveRenderMetrics(opponentPreset, frame, hitboxSize, 1);
     const ox = width * OPPONENT_X_FACTOR;
-    const baseX = ox + (hitboxSize - renderWidth) / 2;
     const gDir = refs.opponentGravity.value;
-    const baseY =
-      gDir === -1
-        ? refs.opponentPosY.value - feetTrim
-        : refs.opponentPosY.value + (hitboxSize - renderHeight) + feetTrim;
-    val.set(scale, 0, baseX, baseY);
+    const { x, y } = resolveSpriteBasePosition({
+      frame,
+      scale,
+      gravityDirection: gDir === -1 ? -1 : 1,
+      worldAnchorX: ox + hitboxSize / 2,
+      worldAnchorY:
+        gDir === -1
+          ? refs.opponentPosY.value - feetTrim
+          : refs.opponentPosY.value + hitboxSize + feetTrim,
+    });
+    val.set(scale, 0, x, y);
   });
 
   const characterRenderTransform = useDerivedValue(() => {

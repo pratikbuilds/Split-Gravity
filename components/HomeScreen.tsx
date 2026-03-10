@@ -86,6 +86,7 @@ export const HomeScreen = ({
             <CharacterSpritePreview 
               characterId={selectedCharacterId === 'custom' ? undefined : selectedCharacter.id}
               sheetUrl={selectedCustomCharacter?.asset.sheetUrl}
+              sheetAnimation={selectedCustomCharacter?.asset.animation}
               size={260} 
               backgroundColor="rgba(255,255,255,0.03)" 
             />

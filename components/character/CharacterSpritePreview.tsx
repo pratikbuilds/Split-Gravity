@@ -2,12 +2,20 @@ import React, { memo, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { Atlas, Canvas, Group, rect, useRSXformBuffer } from '@shopify/react-native-skia';
 import type { CharacterId } from '../../shared/characters';
+import type { GeneratedSpriteAnimationDescriptor } from '../../shared/character-generation-contracts';
 import { getCharacterPresetOrDefault } from '../game/characterSpritePresets';
+import {
+  getSpriteActionEnvelope,
+  resolveGeneratedSpriteActions,
+  resolveSpriteAnchorX,
+  resolveSpriteAnchorY,
+} from '../game/generatedSpriteSheet';
 import { useSkiaImageAsset } from '../game/skiaImageCache';
 
 type CharacterSpritePreviewProps = {
   characterId?: CharacterId;
   sheetUrl?: string | null;
+  sheetAnimation?: GeneratedSpriteAnimationDescriptor | null;
   size?: number;
   frameIntervalMs?: number;
   backgroundColor?: string;
@@ -18,6 +26,7 @@ export const CharacterSpritePreview = memo(
   ({
     characterId,
     sheetUrl,
+    sheetAnimation,
     size = 220,
     frameIntervalMs = 220,
     backgroundColor = '#111827',
@@ -35,13 +44,8 @@ export const CharacterSpritePreview = memo(
       if (!sheetUrl || !image) {
         return preset.actions.idle;
       }
-
-      const cellWidth = Math.floor(image.width() / 6);
-      const cellHeight = Math.floor(image.height() / 3);
-      return Array.from({ length: 6 }, (_, index) =>
-        rect(index * cellWidth, cellHeight * 2, cellWidth, cellHeight)
-      );
-    }, [image, preset.actions.idle, sheetUrl]);
+      return resolveGeneratedSpriteActions(image.width(), image.height(), sheetAnimation).idle;
+    }, [image, preset.actions.idle, sheetAnimation, sheetUrl]);
 
     useEffect(() => {
       const timer = setInterval(() => {
@@ -53,7 +57,16 @@ export const CharacterSpritePreview = memo(
     }, [frameIntervalMs, idleFrames.length]);
 
     const frame = idleFrames[frameIndex % idleFrames.length];
+    const isAnchoredFrame = sheetUrl != null && (frame.anchorX != null || frame.anchorY != null);
+    const anchoredEnvelope = useMemo(
+      () => (isAnchoredFrame ? getSpriteActionEnvelope(idleFrames) : null),
+      [idleFrames, isAnchoredFrame]
+    );
     const spriteRect = useMemo(() => {
+      if (isAnchoredFrame) {
+        return rect(frame.x, frame.y, frame.width, frame.height);
+      }
+
       const horizontalBleed = Math.max(4, Math.round(frame.width * 0.06));
       const verticalBleed = Math.max(6, Math.round(frame.height * 0.07));
 
@@ -79,9 +92,12 @@ export const CharacterSpritePreview = memo(
         Math.min(frame.width + horizontalBleed * 2, maxWidth),
         Math.min(frame.height + verticalBleed * 2, maxHeight)
       );
-    }, [frame.height, frame.width, frame.x, frame.y, image]);
+    }, [frame.height, frame.width, frame.x, frame.y, image, isAnchoredFrame]);
 
     const previewRect = useMemo(() => {
+      if (isAnchoredFrame) {
+        return spriteRect;
+      }
       if (previewMode !== 'jobCard') {
         return spriteRect;
       }
@@ -91,7 +107,7 @@ export const CharacterSpritePreview = memo(
       const portraitX = spriteRect.x + (spriteRect.width - portraitWidth) / 2;
 
       return rect(portraitX, spriteRect.y, portraitWidth, portraitHeight);
-    }, [previewMode, spriteRect]);
+    }, [isAnchoredFrame, previewMode, spriteRect]);
 
     const spriteRects = useMemo(() => [previewRect], [previewRect]);
 
@@ -103,6 +119,30 @@ export const CharacterSpritePreview = memo(
       const bottomInset = size * (isJobCard ? 0.06 : 0.13);
       const availableWidth = size - horizontalInset * 2;
       const availableHeight = size - topInset - bottomInset;
+      const verticalBias = isJobCard ? -size * 0.02 : 0;
+
+      if (anchoredEnvelope) {
+        const scaleMultiplier = isJobCard ? 1.12 : 1.01;
+        const scale =
+          Math.min(
+            availableWidth / Math.max(anchoredEnvelope.width, 1),
+            availableHeight / Math.max(anchoredEnvelope.height, 1)
+          ) * scaleMultiplier;
+        const targetAnchorX =
+          horizontalInset +
+          anchoredEnvelope.left * scale +
+          (availableWidth - anchoredEnvelope.width * scale) / 2;
+        const targetAnchorY =
+          topInset +
+          anchoredEnvelope.top * scale +
+          (availableHeight - anchoredEnvelope.height * scale) / 2 +
+          verticalBias;
+        const x = targetAnchorX - resolveSpriteAnchorX(frame) * scale;
+        const y = targetAnchorY - resolveSpriteAnchorY(frame) * scale;
+        value.set(scale, 0, x, y);
+        return;
+      }
+
       const scaleMultiplier = isJobCard ? 1.08 : 1.01;
       const scale =
         Math.min(availableWidth / previewRect.width, availableHeight / previewRect.height) *
@@ -110,7 +150,6 @@ export const CharacterSpritePreview = memo(
       const renderWidth = previewRect.width * scale;
       const renderHeight = previewRect.height * scale;
       const x = (size - renderWidth) / 2;
-      const verticalBias = isJobCard ? -size * 0.02 : 0;
       const y = topInset + (availableHeight - renderHeight) / 2 + verticalBias;
       value.set(scale, 0, x, y);
     });

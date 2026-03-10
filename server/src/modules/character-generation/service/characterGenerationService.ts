@@ -5,6 +5,7 @@ import { paymentService } from '../../../payments/service';
 import type {
   ActivateCustomCharacterResponse,
   CharacterAssetDescriptor,
+  GeneratedSpriteAnimationDescriptor,
   CharacterGenerationConfigResponse,
   CharacterGenerationJobSummary,
   CreateCharacterGenerationJobRequest,
@@ -16,7 +17,12 @@ import { GeminiSpritePipeline } from '../pipeline/geminiSpritePipeline';
 import { CharacterGenerationRepository } from '../repositories/characterGenerationRepository';
 import { CharacterGenerationQueue } from '../jobs/characterGenerationQueue';
 import { getCharacterAssetStorage } from '../storage';
-import { buildSheetObjectKey, buildThumbnailObjectKey } from '../storage/objectKeys';
+import {
+  buildAnimationObjectKey,
+  buildAnimationObjectKeyFromSheet,
+  buildSheetObjectKey,
+  buildThumbnailObjectKey,
+} from '../storage/objectKeys';
 
 const DEFAULT_JOB_NAME = 'Runner';
 
@@ -90,6 +96,7 @@ export class CharacterGenerationService {
     width: number,
     height: number
   ): Promise<CharacterAssetDescriptor> {
+    const animation = await this.readAnimationDescriptor(sheetObjectKey);
     return {
       sheetUrl: await getCharacterAssetStorage().getObjectUrl(sheetObjectKey),
       thumbnailUrl: thumbnailObjectKey
@@ -99,7 +106,24 @@ export class CharacterGenerationService {
       height,
       gridColumns: 6,
       gridRows: 3,
+      animation,
     };
+  }
+
+  private async readAnimationDescriptor(
+    sheetObjectKey: string
+  ): Promise<GeneratedSpriteAnimationDescriptor | null> {
+    const storage = getCharacterAssetStorage();
+    try {
+      const metadataBuffer = await storage.getObject(buildAnimationObjectKeyFromSheet(sheetObjectKey));
+      if (!metadataBuffer) return null;
+      const parsed = JSON.parse(metadataBuffer.toString('utf8')) as GeneratedSpriteAnimationDescriptor;
+      if (parsed?.version !== 1) return null;
+      return parsed;
+    } catch (error) {
+      console.warn('Loading sprite animation metadata failed:', error);
+      return null;
+    }
   }
 
   private async toVersionSummary(input: {
@@ -353,6 +377,11 @@ export class CharacterGenerationService {
         pendingCharacterId,
         pendingVersionId
       );
+      const animationObjectKey = buildAnimationObjectKey(
+        job.playerId,
+        pendingCharacterId,
+        pendingVersionId
+      );
       const thumbnailObjectKey = buildThumbnailObjectKey(
         job.playerId,
         pendingCharacterId,
@@ -368,6 +397,11 @@ export class CharacterGenerationService {
         objectKey: thumbnailObjectKey,
         body: generated.thumbnailBuffer,
         contentType: 'image/png',
+      });
+      await getCharacterAssetStorage().putObject({
+        objectKey: animationObjectKey,
+        body: Buffer.from(JSON.stringify(generated.animation)),
+        contentType: 'application/json',
       });
 
       const { character, version } = await this.repository.createCharacterVersion({

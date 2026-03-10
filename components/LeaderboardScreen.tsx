@@ -24,16 +24,21 @@ function maskWallet(address: string): string {
 
 function formatAchievedAt(iso: string): string {
   try {
-    const d = new Date(iso);
-    const now = new Date();
-    const isToday =
-      d.getDate() === now.getDate() &&
-      d.getMonth() === now.getMonth() &&
-      d.getFullYear() === now.getFullYear();
-    if (isToday) {
-      return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-    }
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const d = new Date(iso).getTime();
+    const now = Date.now();
+    const diffMs = now - d;
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHr = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHr / 24);
+    const diffWk = Math.floor(diffDay / 7);
+
+    if (diffSec < 60) return 'just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    if (diffHr < 24) return `${diffHr}h ago`;
+    if (diffDay < 7) return `${diffDay}d ago`;
+    if (diffWk < 4) return `${diffWk}w ago`;
+    return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   } catch {
     return '';
   }

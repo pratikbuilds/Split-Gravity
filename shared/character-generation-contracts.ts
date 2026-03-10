@@ -39,6 +39,27 @@ export interface CharacterAssetDescriptor {
   height: number;
   gridColumns: number;
   gridRows: number;
+  animation?: GeneratedSpriteAnimationDescriptor | null;
+}
+
+export interface GeneratedSpriteFrameDescriptor {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  anchorX: number;
+  anchorY: number;
+  referenceHeight: number;
+}
+
+export interface GeneratedSpriteAnimationDescriptor {
+  version: 1;
+  actions: {
+    run: GeneratedSpriteFrameDescriptor[];
+    jump: GeneratedSpriteFrameDescriptor[];
+    fall: GeneratedSpriteFrameDescriptor[];
+    idle: GeneratedSpriteFrameDescriptor[];
+  };
 }
 
 export interface CustomCharacterVersionSummary {

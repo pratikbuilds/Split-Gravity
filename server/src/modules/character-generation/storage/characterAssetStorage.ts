@@ -7,4 +7,5 @@ export interface CharacterAssetUpload {
 export interface CharacterAssetStorage {
   putObject(input: CharacterAssetUpload): Promise<void>;
   getObjectUrl(objectKey: string): Promise<string>;
+  getObject(objectKey: string): Promise<Buffer | null>;
 }

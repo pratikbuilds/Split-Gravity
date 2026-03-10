@@ -30,6 +30,7 @@ export const GenerationJobCard = ({ job, onUseCharacter }: GenerationJobCardProp
         {job.result?.asset.sheetUrl ? (
           <CharacterSpritePreview
             sheetUrl={job.result.asset.sheetUrl}
+            sheetAnimation={job.result.asset.animation}
             size={92}
             backgroundColor="rgba(255,255,255,0.04)"
             previewMode="jobCard"

@@ -1,5 +1,6 @@
 import type { SharedValue } from 'react-native-reanimated';
 import type { CharacterId } from '../../shared/characters';
+import type { GeneratedSpriteAnimationDescriptor } from '../../shared/character-generation-contracts';
 import type {
   Chunk,
   GameAudioEvent,
@@ -23,8 +24,10 @@ export type GameCanvasProps = {
   initialGravityDirection?: GravityDirection;
   characterId?: CharacterId;
   characterCustomSpriteUrl?: string | null;
+  characterCustomSpriteAnimation?: GeneratedSpriteAnimationDescriptor | null;
   opponentCharacterId?: CharacterId;
   opponentCustomSpriteUrl?: string | null;
+  opponentCustomSpriteAnimation?: GeneratedSpriteAnimationDescriptor | null;
   opponentInitialGravityDirection?: GravityDirection;
   opponentSnapshotValue?: SharedValue<OpponentSnapshot | null>;
   opponentConnectionState?: 'connected' | 'reconnecting' | 'forfeit_pending';

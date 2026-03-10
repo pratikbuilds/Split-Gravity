@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { env } from '../../../config/env';
 import type { CharacterAssetStorage, CharacterAssetUpload } from './characterAssetStorage';
@@ -40,5 +40,18 @@ export class LocalCharacterAssetStorage implements CharacterAssetStorage {
   async getObjectUrl(objectKey: string) {
     const segments = normalizeObjectKey(objectKey);
     return `${this.publicBaseUrl}/character-assets/${encodeObjectKey(segments)}`;
+  }
+
+  async getObject(objectKey: string) {
+    try {
+      const segments = normalizeObjectKey(objectKey);
+      const sourcePath = path.join(this.assetDir, ...segments);
+      return await readFile(sourcePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return null;
+      }
+      throw error;
+    }
   }
 }

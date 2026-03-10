@@ -54,4 +54,25 @@ export class S3CharacterAssetStorage implements CharacterAssetStorage {
       { expiresIn: 60 * 60 }
     );
   }
+
+  async getObject(objectKey: string) {
+    try {
+      const response = await this.client.send(
+        new GetObjectCommand({
+          Bucket: env.CHARACTER_BUCKET_NAME,
+          Key: objectKey,
+        })
+      );
+
+      if (!response.Body) return null;
+      const byteArray = await response.Body.transformToByteArray();
+      return Buffer.from(byteArray);
+    } catch (error) {
+      const code = (error as { name?: string }).name;
+      if (code === 'NoSuchKey' || code === 'NotFound') {
+        return null;
+      }
+      throw error;
+    }
+  }
 }

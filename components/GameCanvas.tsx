@@ -278,8 +278,10 @@ export const GameCanvas = ({
   initialGravityDirection = 1,
   characterId,
   characterCustomSpriteUrl,
+  characterCustomSpriteAnimation,
   opponentCharacterId,
   opponentCustomSpriteUrl,
+  opponentCustomSpriteAnimation,
   opponentInitialGravityDirection,
   opponentSnapshotValue,
   opponentConnectionState = 'connected',
@@ -434,14 +436,16 @@ export const GameCanvas = ({
     width,
     height,
     backgroundIndex,
-    terrainTheme,
-    characterId,
-    characterCustomSpriteUrl,
-    opponentCharacterId,
-    opponentCustomSpriteUrl,
-    platforms,
-    refs,
-  });
+      terrainTheme,
+      characterId,
+      characterCustomSpriteUrl,
+      characterCustomSpriteAnimation,
+      opponentCharacterId,
+      opponentCustomSpriteUrl,
+      opponentCustomSpriteAnimation,
+      platforms,
+      refs,
+    });
 
   useEffect(() => {
     void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);

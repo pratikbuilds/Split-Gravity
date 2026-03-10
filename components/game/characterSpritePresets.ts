@@ -5,7 +5,15 @@ import {
   type PresetCharacterId,
 } from '../../shared/characters';
 
-export type SpriteFrame = { x: number; y: number; width: number; height: number };
+export type SpriteFrame = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  anchorX?: number;
+  anchorY?: number;
+  referenceHeight?: number;
+};
 
 export type CharacterAction = 'idle' | 'run' | 'jump' | 'fall';
 
