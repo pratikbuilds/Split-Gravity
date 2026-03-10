@@ -14,6 +14,15 @@ The backend is in transition from an in-memory prototype to a modular, Postgres-
 - `docs/plans/2026-03-09-backend-payments-redesign-design.md`
 - `docs/plans/2026-03-09-backend-payments-overhaul.md`
 
+## Testing with the app locally
+
+1. Start the backend: `pnpm --dir server dev` (port 4100).
+2. Start the app: `pnpm dev` (Expo in LAN mode; avoid `--tunnel` for local backend).
+3. Ensure device and machine are on the same Wi‑Fi, then scan the QR code.
+4. The app infers the backend URL from the Metro host (e.g. `http://<your-lan-ip>:4100`). If it doesn’t connect, set `EXPO_PUBLIC_BACKEND_URL=http://<your-lan-ip>:4100` in the project root `.env` (see root `.env.example`).
+5. If Socket.IO rejects the connection, add your Metro origin to `SOCKET_IO_CORS_ORIGINS` in `server/.env` (e.g. `http://192.168.1.100:8081`).
+6. For AI Runner Lab locally, set `SERVER_PUBLIC_BASE_URL=http://<your-lan-ip>:4100` in `server/.env` so generated sprite URLs are reachable from your phone/emulator.
+
 ## Scripts
 
 From the repo root:
@@ -40,6 +49,11 @@ Copy `server/.env.example` and set:
 - `SOLANA_RPC_WS`: Solana WebSocket endpoint for subscriptions/confirmation flows.
 - `VAULT_PUBLIC_KEY`: custodial vault address that receives deposits and sends payouts/withdrawals.
 - `VAULT_SECRET_KEY_JSON`: 64-byte secret key JSON for the custodial signer. This should eventually move behind a safer signer boundary.
+- `SERVER_PUBLIC_BASE_URL`: the base URL devices should use to fetch generated character assets when local file storage is active.
+- `CHARACTER_GENERATION_ENABLED`: set to `1` to enable the AI Runner Lab endpoints.
+- `GEMINI_API_KEY`: required by the Gemini sprite generation pipeline.
+- `CHARACTER_LOCAL_ASSET_DIR`: optional local output directory for generated sprite and thumbnail PNGs.
+- `CHARACTER_BUCKET_*`: optional S3-compatible storage settings. If omitted, the backend now falls back to local file storage and serves assets from `/character-assets/*`.
 
 ## Payment Model
 

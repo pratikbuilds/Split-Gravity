@@ -20,6 +20,7 @@ const envSchema = z.object({
   SOCKET_IO_CORS_ORIGINS: z.string().optional(),
   VAULT_PUBLIC_KEY: z.string().min(32).optional(),
   VAULT_SECRET_KEY_JSON: z.string().min(10).optional(),
+  SERVER_PUBLIC_BASE_URL: z.string().url().optional(),
   CHARACTER_GENERATION_ENABLED: z
     .union([z.literal('0'), z.literal('1')])
     .optional()
@@ -38,6 +39,7 @@ const envSchema = z.object({
     .union([z.literal('0'), z.literal('1')])
     .optional()
     .transform((value: '0' | '1' | undefined) => value === '1'),
+  CHARACTER_LOCAL_ASSET_DIR: z.string().min(1).optional(),
   EXPO_PUSH_ACCESS_TOKEN: z.string().min(1).optional(),
 });
 
@@ -54,6 +56,7 @@ export const env = {
   SOCKET_IO_CORS_ORIGINS: parsedEnv.SOCKET_IO_CORS_ORIGINS,
   VAULT_PUBLIC_KEY: parsedEnv.VAULT_PUBLIC_KEY,
   VAULT_SECRET_KEY_JSON: parsedEnv.VAULT_SECRET_KEY_JSON,
+  SERVER_PUBLIC_BASE_URL: parsedEnv.SERVER_PUBLIC_BASE_URL,
   CHARACTER_GENERATION_ENABLED: parsedEnv.CHARACTER_GENERATION_ENABLED ?? false,
   CHARACTER_GENERATION_TOKEN_ID: parsedEnv.CHARACTER_GENERATION_TOKEN_ID,
   CHARACTER_GENERATION_ENTRY_FEE_TIER_ID: parsedEnv.CHARACTER_GENERATION_ENTRY_FEE_TIER_ID,
@@ -66,6 +69,7 @@ export const env = {
   CHARACTER_BUCKET_SECRET_KEY: parsedEnv.CHARACTER_BUCKET_SECRET_KEY,
   CHARACTER_BUCKET_PUBLIC_BASE_URL: parsedEnv.CHARACTER_BUCKET_PUBLIC_BASE_URL,
   CHARACTER_BUCKET_SIGNED_URLS: parsedEnv.CHARACTER_BUCKET_SIGNED_URLS ?? false,
+  CHARACTER_LOCAL_ASSET_DIR: parsedEnv.CHARACTER_LOCAL_ASSET_DIR,
   EXPO_PUSH_ACCESS_TOKEN: parsedEnv.EXPO_PUSH_ACCESS_TOKEN,
 } as const;
 

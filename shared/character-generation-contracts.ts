@@ -18,6 +18,8 @@ export interface CharacterGenerationPricing {
 
 export interface CharacterGenerationConfigResponse {
   enabled: boolean;
+  /** True when the pg-boss worker is started and processing jobs. If false, jobs stay queued. */
+  workerRunning: boolean;
   generationSize: '2K';
   pricing: CharacterGenerationPricing;
   maxConcurrentJobs: number;

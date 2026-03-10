@@ -99,3 +99,14 @@ Three visual themes: `grass`, `purple`, `stone` — each with top/topLeft/topRig
 4. **Platform rects SharedValue must be flat `number[]`** — worklets can't handle object arrays efficiently
 5. **`useAnimatedReaction` returning objects:** Reanimated does shallow comparison, so `{ a, b }` objects work for throttling but create the object every frame on the UI thread. Prefer single numeric buckets when possible.
 6. **Never alter user sprite backgrounds/transparency** — when replacing sprite sheets, copy files exactly as provided (no background edits or flattening). Verify source format/alpha first; if alpha is missing or background is baked into the asset, confirm with the user before proceeding.
+
+## Learned User Preferences
+
+- When replacing or using user-provided sprite sheets, use the exact file they provided; do not modify images with CLI or other tools.
+- For level sections, keep layouts symmetric and fully playable; avoid adding excessive gaps solely to increase difficulty.
+- For larger design changes (e.g. level sections redesign), brainstorm and plan before implementing.
+
+## Learned Workspace Facts
+
+- User-supplied character sprite sheets in this project are often 5504×3072; use this as the canonical size when adding or swapping character atlases.
+- Pillars in level sections are optional; not every section needs pillars—ledge-only and variable-height-only sections are valid.

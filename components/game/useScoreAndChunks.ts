@@ -137,7 +137,10 @@ export const useScoreAndChunks = ({
   // Score updates live on the UI thread via SharedValue — no React re-renders.
   // ScoreOverlay subscribes independently and only re-renders itself.
   useAnimatedReaction(
-    () => refs.totalScroll.value,
+    () => {
+      'worklet';
+      return refs.totalScroll.value;
+    },
     (scroll) => {
       'worklet';
       scoreValue.value = scroll;

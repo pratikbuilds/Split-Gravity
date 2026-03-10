@@ -57,7 +57,10 @@ const ScoreOverlay = React.memo(({ scoreValue }: { scoreValue: SharedValue<numbe
   const [display, setDisplay] = useState(0);
 
   useAnimatedReaction(
-    () => Math.floor(scoreValue.value / SCORE_DISPLAY_BUCKET),
+    () => {
+      'worklet';
+      return Math.floor(scoreValue.value / SCORE_DISPLAY_BUCKET);
+    },
     (bucket, prev) => {
       'worklet';
       if (bucket !== prev) {
@@ -92,6 +95,7 @@ const OpponentOverlay = React.memo(
 
     useAnimatedReaction(
       () => {
+        'worklet';
         const snapshot = snapshotValue.value;
         if (!snapshot) return null;
         return {
@@ -169,7 +173,10 @@ const DebugOverlay = React.memo(
     const [overlay, setOverlay] = useState<DebugOverlayState | null>(null);
 
     useAnimatedReaction(
-      () => Math.floor(refs.simTimeMs.value / DEBUG_OVERLAY_UPDATE_MS),
+      () => {
+        'worklet';
+        return Math.floor(refs.simTimeMs.value / DEBUG_OVERLAY_UPDATE_MS);
+      },
       () => {
         'worklet';
         const playerX = refs.charX.value;
@@ -519,7 +526,10 @@ export const GameCanvas = ({
   const opponentSnapshotSignal = opponentSnapshotValue ?? fallbackOpponentSnapshotValue;
 
   useAnimatedReaction(
-    () => opponentSnapshotSignal.value,
+    () => {
+      'worklet';
+      return opponentSnapshotSignal.value;
+    },
     (snapshot) => {
       'worklet';
       if (!snapshot) {

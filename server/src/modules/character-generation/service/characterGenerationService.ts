@@ -76,6 +76,7 @@ export class CharacterGenerationService {
   getConfig(): CharacterGenerationConfigResponse {
     return {
       enabled: env.CHARACTER_GENERATION_ENABLED,
+      workerRunning: this.workerStarted,
       generationSize: '2K',
       pricing: resolveGenerationPricing(),
       maxConcurrentJobs: env.CHARACTER_GENERATION_MAX_CONCURRENT_JOBS,

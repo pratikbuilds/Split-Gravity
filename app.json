@@ -10,7 +10,15 @@
       "tsconfigPaths": true
     },
     "plugins": [
-      "expo-dev-client"
+      "expo-dev-client",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "This app uses your photo library to upload a reference image for character generation.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ]
     ],
     "orientation": "default",
     "icon": "./assets/icon.png",

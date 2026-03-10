@@ -41,7 +41,32 @@ const LOG_STATE_EVENTS = env.LOG_STATE_EVENTS;
 
 export const startServer = async () => {
   await paymentService.initialize();
-  await characterGenerationService.startWorker();
+
+  try {
+    await characterGenerationService.startWorker();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const code = (err as NodeJS.ErrnoException & { code?: string })?.code;
+    const subErrors = (err as { errors?: unknown[] })?.errors ?? [];
+    const isDbConnection =
+      code === 'ECONNREFUSED' ||
+      msg.includes('ECONNREFUSED') ||
+      msg.includes('connect') ||
+      subErrors.some(
+        (e) =>
+          (e as NodeJS.ErrnoException)?.code === 'ECONNREFUSED' ||
+          (e instanceof Error && e.message.includes('ECONNREFUSED'))
+      );
+    if (isDbConnection) {
+      logAt(
+        'warn',
+        'character_generation.worker_skipped',
+        { reason: 'database_unavailable', detail: msg }
+      );
+    } else {
+      throw err;
+    }
+  }
 
   const app = createHttpApp();
   const { httpServer, io } = createSocketServer(app);

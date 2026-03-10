@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCharacterGenerationFlow } from '../hooks/useCharacterGenerationFlow';
 import { useCustomCharacterGallery } from '../hooks/useCustomCharacterGallery';
@@ -103,6 +103,15 @@ export const CharacterGenerationScreen = ({
           </Pressable>
         </View>
 
+        {generation.config?.enabled && generation.config?.workerRunning === false ? (
+          <View className="rounded-2xl border border-amber-500/50 bg-amber-500/10 p-4">
+            <Text className="text-sm font-bold text-amber-400">
+              Server worker not running — jobs will stay queued until the server is restarted with
+              the worker enabled.
+            </Text>
+          </View>
+        ) : null}
+
         <View>
           <Text className="text-4xl font-black italic tracking-widest text-white">
             AI RUNNER LAB
@@ -167,6 +176,20 @@ export const CharacterGenerationScreen = ({
               </Pressable>
             ) : null}
           </View>
+
+          {referenceImageDataUrl ? (
+            <View className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-black/20 p-3">
+              <Text className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">
+                Reference image
+              </Text>
+              <Image
+                source={{ uri: referenceImageDataUrl }}
+                style={{ width: '100%', height: 200 }}
+                resizeMode="contain"
+                accessibilityLabel="Selected reference image for character generation"
+              />
+            </View>
+          ) : null}
 
           <Pressable
             onPress={() => void handleSubmit()}

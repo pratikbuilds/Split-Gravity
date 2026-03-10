@@ -20,6 +20,7 @@ export class CharacterGenerationQueue {
 
     const boss = this.getBoss();
     await boss.start();
+    await boss.createQueue(QUEUE_NAME);
     await boss.work<{ jobId?: string }>(QUEUE_NAME, async (jobs) => {
       const [job] = jobs;
       const jobId = String(job?.data?.jobId ?? '');

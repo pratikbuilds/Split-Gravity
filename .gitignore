@@ -25,3 +25,7 @@ android
 # Local git worktrees
 .worktrees
 .pnpm-store/
+
+# Local env (see .env.example for app backend URL)
+.env
+server/.data/

@@ -174,7 +174,7 @@ export class GeminiSpritePipeline {
       }
 
       const response = await this.client.models.generateContent({
-        model: 'gemini-2.5-flash-image-preview',
+        model: 'gemini-3.1-flash-image-preview',
         contents: { parts },
         config: {
           responseModalities: ['TEXT', 'IMAGE'],
@@ -220,7 +220,33 @@ export class GeminiSpritePipeline {
         };
       }
 
-      correction = `Retry ${attempt}/${maxAttempts}: previous result violated grid or framing rules. Regenerate from scratch with exact 6x3 layout, stable framing, full-body cells, and no UI artifacts.`;
+      const failedChecks: string[] = [];
+      if (inspection.columns !== 6 || inspection.rows !== 3) {
+        failedChecks.push(
+          `grid=${inspection.columns ?? 'unknown'}x${inspection.rows ?? 'unknown'} (must be 6x3)`
+        );
+      }
+      if (!inspection.fullBodyAllFrames) failedChecks.push('full-body framing');
+      if (!inspection.idleRowFullBodyAllFrames) {
+        failedChecks.push('idle row full-body in all 6 frames');
+      }
+      if (!inspection.idleRowLegsVisibleAllFrames) {
+        failedChecks.push('idle row legs/feet visibility in all 6 frames');
+      }
+      if (!inspection.idleRowNoCloseUpCrop) {
+        failedChecks.push('idle row no close-up/bust/portrait crop');
+      }
+      if (!inspection.cameraDistanceStable) {
+        failedChecks.push('stable camera distance across rows');
+      }
+      if (!inspection.consistentScale) failedChecks.push('consistent character scale');
+      if (!inspection.uniformSpacing) failedChecks.push('uniform cell spacing/alignment');
+      if (!inspection.noTextOrUi) failedChecks.push('no text/UI artifacts');
+      if (!inspection.runRowNatural) failedChecks.push('natural run cycle readability');
+
+      correction =
+        `RETRY ${attempt}/${maxAttempts}: Previous output failed checks: ${failedChecks.join(', ')}. ` +
+        'Regenerate from scratch. MUST satisfy all: EXACT 6x3 grid, fixed camera distance across all rows, every frame full-body head-to-feet, IDLE row with both legs and both feet visible in all 6 cells and no portrait/bust crops, consistent scale across all 18 frames, uniform spacing and baseline alignment, zero text/UI artifacts, and a natural run cycle with (1) at least one foot on ground in contact/down frames—no floating, (2) visible arm swing every frame—no stiff arms, (3) leg poses that read as run not jump—no pouncing or both-feet-up, (4) no foot sliding.';
     }
 
     throw new Error('Unable to generate a compliant 6x3 sprite sheet after multiple attempts.');

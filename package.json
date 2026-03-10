@@ -7,6 +7,7 @@
     "dev": "expo start",
     "dev:server": "pnpm --dir server dev",
     "start": "expo start",
+    "start:clear": "expo start --clear",
     "prebuild": "expo prebuild",
     "lint": "eslint \"**/*.{js,jsx,ts,tsx}\" && prettier -c \"**/*.{js,jsx,ts,tsx,json}\"",
     "test:deterministic": "pnpm --dir server test",
