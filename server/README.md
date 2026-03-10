@@ -32,8 +32,6 @@ The backend is in transition from an in-memory prototype to a modular, Postgres-
 
 ## Scripts
 
-Push changes
-
 From the repo root:
 
 ```bash
