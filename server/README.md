@@ -23,6 +23,13 @@ The backend is in transition from an in-memory prototype to a modular, Postgres-
 5. If Socket.IO rejects the connection, add your Metro origin to `SOCKET_IO_CORS_ORIGINS` in `server/.env` (e.g. `http://192.168.1.100:8081`).
 6. For AI Runner Lab locally, set `SERVER_PUBLIC_BASE_URL=http://<your-lan-ip>:4100` in `server/.env` so generated sprite URLs are reachable from your phone/emulator.
 
+## Deploy and test on device
+
+1. **Push and deploy server** — Push the branch and deploy the server (e.g. Railway). Use the **public** Postgres URL (not `*railway.internal`). Set `CHARACTER_GENERATION_ENABLED=1`, `GEMINI_API_KEY`, and either `CHARACTER_BUCKET_*` (recommended for production) or set `SERVER_PUBLIC_BASE_URL` to the deployed server URL.
+2. **Point the app at the deployed backend** — In the repo root `.env` set `EXPO_PUBLIC_BACKEND_URL=https://<your-deployed-server>` (no trailing slash).
+3. **Build and run on a physical device** — `pnpm dev` then open the app on the device (same network as Metro), or `eas build --profile preview --platform ios` (or `android`) and install the built app. The app uses `EXPO_PUBLIC_BACKEND_URL` from the build.
+4. **Smoke-check character generation** — In the app open Runner Lab, connect wallet, pay entry if required, submit a prompt. Confirm job goes queued → running → succeeded and the sprite appears. If the worker is not running, the UI shows an amber banner (`workerRunning: false`).
+
 ## Scripts
 
 From the repo root:
