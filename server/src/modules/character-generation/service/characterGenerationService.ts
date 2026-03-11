@@ -115,9 +115,13 @@ export class CharacterGenerationService {
   ): Promise<GeneratedSpriteAnimationDescriptor | null> {
     const storage = getCharacterAssetStorage();
     try {
-      const metadataBuffer = await storage.getObject(buildAnimationObjectKeyFromSheet(sheetObjectKey));
+      const metadataBuffer = await storage.getObject(
+        buildAnimationObjectKeyFromSheet(sheetObjectKey)
+      );
       if (!metadataBuffer) return null;
-      const parsed = JSON.parse(metadataBuffer.toString('utf8')) as GeneratedSpriteAnimationDescriptor;
+      const parsed = JSON.parse(
+        metadataBuffer.toString('utf8')
+      ) as GeneratedSpriteAnimationDescriptor;
       if (parsed?.version !== 1) return null;
       return parsed;
     } catch (error) {

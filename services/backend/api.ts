@@ -275,7 +275,11 @@ export const backendApi = {
     fetchJson<CustomCharacterListResponse>('/custom-characters', {
       headers: { Authorization: `Bearer ${accessToken}` },
     }),
-  renameCustomCharacter: (accessToken: string, characterId: string, payload: RenameCustomCharacterRequest) =>
+  renameCustomCharacter: (
+    accessToken: string,
+    characterId: string,
+    payload: RenameCustomCharacterRequest
+  ) =>
     fetchJson(`/custom-characters/${characterId}/rename`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -287,7 +291,9 @@ export const backendApi = {
       headers: { Authorization: `Bearer ${accessToken}` },
     }),
   getCustomCharacterVersion: (versionId: string) =>
-    fetchJson<{ version: CustomCharacterVersionSummary }>(`/custom-characters/versions/${versionId}`),
+    fetchJson<{ version: CustomCharacterVersionSummary }>(
+      `/custom-characters/versions/${versionId}`
+    ),
   registerExpoPushToken: (accessToken: string, payload: RegisterExpoPushTokenRequest) =>
     fetchJson('/notifications/expo-token', {
       method: 'POST',
@@ -300,5 +306,4 @@ export { ApiError };
 
 /** True when the backend rejected the token (401 or "Session expired."). Call clearSession and prompt re-sign-in. */
 export const isSessionExpiredError = (error: unknown): boolean =>
-  error instanceof ApiError &&
-  (error.status === 401 || error.message === 'Session expired.');
+  error instanceof ApiError && (error.status === 401 || error.message === 'Session expired.');

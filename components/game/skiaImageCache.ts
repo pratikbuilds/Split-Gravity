@@ -63,7 +63,7 @@ export function preloadSkiaImages(sources: readonly SkiaImageSource[]): Promise<
 
 export function useSkiaImageAsset(source: SkiaImageSource | null | undefined): SkImage | null {
   const [image, setImage] = useState<SkImage | null>(() =>
-    source == null ? null : decodedImageCache.get(getSourceCacheKey(source)) ?? null
+    source == null ? null : (decodedImageCache.get(getSourceCacheKey(source)) ?? null)
   );
 
   useEffect(() => {

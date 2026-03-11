@@ -1,12 +1,14 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, View, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ScreenOrientation from 'expo-screen-orientation';
+import { useWalletSession } from '../hooks/useWalletSession';
 import type { CharacterId } from '../shared/characters';
 import type { CustomCharacterSummary } from '../shared/character-generation-contracts';
 import { CharacterSpritePreview } from './character/CharacterSpritePreview';
 import { getCharacterDefinitionOrDefault } from './game/characterSpritePresets';
-import { WalletStatusChip } from './wallet/WalletStatusChip';
+import { WalletMenuTrigger } from './wallet/WalletMenuTrigger';
+import { WalletSheet } from './wallet/WalletSheet';
 
 type HomeScreenProps = {
   selectedCharacterId: CharacterId;
@@ -28,6 +30,8 @@ export const HomeScreen = ({
   onOpenWalletDebug,
 }: HomeScreenProps) => {
   const insets = useSafeAreaInsets();
+  const walletSession = useWalletSession();
+  const [walletSheetVisible, setWalletSheetVisible] = useState(false);
 
   useEffect(() => {
     void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
@@ -36,14 +40,20 @@ export const HomeScreen = ({
   const selectedCharacter = getCharacterDefinitionOrDefault(selectedCharacterId);
   const selectedCharacterName =
     selectedCharacterId === 'custom'
-      ? selectedCustomCharacter?.displayName ?? 'Custom Runner'
+      ? (selectedCustomCharacter?.displayName ?? 'Custom Runner')
       : selectedCharacter.displayName;
 
   return (
     <View style={styles.container}>
       {/* Geometric Split Background */}
-      <View style={StyleSheet.absoluteFill} pointerEvents="none"><View style={styles.splitDiagonal} /></View>
-      
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        <View style={styles.splitDiagonal} />
+      </View>
+      <WalletSheet
+        onClose={() => setWalletSheetVisible(false)}
+        visible={walletSheetVisible}
+        walletSession={walletSession}
+      />
 
       <ScrollView
         className="flex-1"
@@ -53,87 +63,100 @@ export const HomeScreen = ({
           paddingTop: Math.max(insets.top + 16, 48),
         }}
         showsVerticalScrollIndicator={false}>
-        
         {/* Top Bar: Wallet */}
-        <View className="w-full px-6 flex-row justify-end items-center">
-          <WalletStatusChip />
+        <View className="w-full flex-row items-center justify-end px-6">
+          <WalletMenuTrigger
+            hasValidSession={walletSession.hasValidSession}
+            onPress={() => setWalletSheetVisible(true)}
+            walletAddress={walletSession.walletAddress}
+          />
         </View>
 
-        <View className="flex-1 px-6 justify-center items-center">
+        <View className="flex-1 items-center justify-center px-6">
           {/* Game Title */}
-          <Pressable 
-            onLongPress={onOpenWalletDebug} 
+          <Pressable
+            onLongPress={onOpenWalletDebug}
             disabled={!onOpenWalletDebug}
-            className="items-center z-10 w-full"
-            style={{ marginBottom: -10 }}
-          >
-            <Text 
-              className="text-[64px] font-black tracking-widest text-white italic" 
-              style={{ textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 4 }, textShadowRadius: 10 }}
-            >
+            className="z-10 w-full items-center"
+            style={{ marginBottom: -10 }}>
+            <Text
+              className="text-[64px] font-black italic tracking-widest text-white"
+              style={{
+                textShadowColor: 'rgba(0,0,0,0.5)',
+                textShadowOffset: { width: 0, height: 4 },
+                textShadowRadius: 10,
+              }}>
               SPLIT
             </Text>
-            <Text 
-              className="text-[52px] font-black tracking-wider text-orange-500 italic"
-              style={{ marginTop: -24, textShadowColor: 'rgba(249,115,22,0.4)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 20 }}
-            >
+            <Text
+              className="text-[52px] font-black italic tracking-wider text-orange-500"
+              style={{
+                marginTop: -24,
+                textShadowColor: 'rgba(249,115,22,0.4)',
+                textShadowOffset: { width: 0, height: 0 },
+                textShadowRadius: 20,
+              }}>
               GRAVITY
             </Text>
           </Pressable>
 
           {/* Hero Character - positioned to interact dynamically with the title */}
-          <View className="items-center z-20 my-4" style={{ transform: [{ scale: 1.05 }] }}>
-            <CharacterSpritePreview 
+          <View className="z-20 my-4 items-center" style={{ transform: [{ scale: 1.05 }] }}>
+            <CharacterSpritePreview
               characterId={selectedCharacterId === 'custom' ? undefined : selectedCharacter.id}
               sheetUrl={selectedCustomCharacter?.asset.sheetUrl}
               sheetAnimation={selectedCustomCharacter?.asset.animation}
-              size={260} 
-              backgroundColor="rgba(255,255,255,0.03)" 
+              size={260}
+              backgroundColor="rgba(255,255,255,0.03)"
             />
-            <View className="bg-black/40 px-4 py-1.5 rounded-full mt-4 border border-white/10">
-              <Text className="text-sm font-bold text-orange-200 tracking-wider uppercase">
+            <View className="mt-4 rounded-full border border-white/10 bg-black/40 px-4 py-1.5">
+              <Text className="text-sm font-bold uppercase tracking-wider text-orange-200">
                 {selectedCharacterName}
               </Text>
             </View>
           </View>
 
           {/* Main Actions */}
-          <View className="w-full max-w-sm mt-8 gap-4 z-30">
+          <View className="z-30 mt-8 w-full max-w-sm gap-4">
             <Pressable
               onPress={onSinglePlay}
-              className="w-full rounded-2xl bg-orange-500 overflow-hidden active:scale-95 transition-transform"
-              style={styles.primaryButton}
-            >
-              <View className="px-8 py-5 items-center justify-center bg-white/10">
-                <Text className="text-2xl font-black text-white tracking-wide uppercase">Solo Run</Text>
+              className="w-full overflow-hidden rounded-2xl bg-orange-500 transition-transform active:scale-95"
+              style={styles.primaryButton}>
+              <View className="items-center justify-center bg-white/10 px-8 py-5">
+                <Text className="text-2xl font-black uppercase tracking-wide text-white">
+                  Solo Run
+                </Text>
               </View>
             </Pressable>
-            
+
             <Pressable
               onPress={onMultiplay}
-              className="w-full rounded-2xl bg-slate-800 border border-slate-700 active:scale-95 transition-transform"
-            >
-              <View className="px-8 py-5 items-center justify-center">
-                <Text className="text-xl font-bold text-white tracking-wide uppercase">Multiplayer</Text>
+              className="w-full rounded-2xl border border-slate-700 bg-slate-800 transition-transform active:scale-95">
+              <View className="items-center justify-center px-8 py-5">
+                <Text className="text-xl font-bold uppercase tracking-wide text-white">
+                  Multiplayer
+                </Text>
               </View>
             </Pressable>
           </View>
 
           {/* Secondary Actions */}
-          <View className="w-full max-w-sm flex-row gap-4 mt-6 z-30 justify-center">
+          <View className="z-30 mt-6 w-full max-w-sm flex-row justify-center gap-4">
             <Pressable
               onPress={onOpenCharacterSelect}
-              className="flex-1 rounded-xl bg-white/5 border border-white/10 px-4 py-3 active:bg-white/10 transition-colors"
-            >
-              <Text className="text-center text-sm font-bold text-slate-300 uppercase tracking-wider">Runners</Text>
+              className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 transition-colors active:bg-white/10">
+              <Text className="text-center text-sm font-bold uppercase tracking-wider text-slate-300">
+                Runners
+              </Text>
             </Pressable>
-            
+
             {onOpenLeaderboard ? (
               <Pressable
                 onPress={onOpenLeaderboard}
-                className="flex-1 rounded-xl bg-white/5 border border-white/10 px-4 py-3 active:bg-white/10 transition-colors"
-              >
-                <Text className="text-center text-sm font-bold text-amber-400 uppercase tracking-wider">Rankings</Text>
+                className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 transition-colors active:bg-white/10">
+                <Text className="text-center text-sm font-bold uppercase tracking-wider text-amber-400">
+                  Rankings
+                </Text>
               </Pressable>
             ) : null}
           </View>
@@ -165,5 +188,5 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.4,
     shadowRadius: 12,
     elevation: 8,
-  }
+  },
 });

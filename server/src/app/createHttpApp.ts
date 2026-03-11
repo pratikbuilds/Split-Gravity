@@ -15,12 +15,9 @@ export const createHttpApp = () => {
       env.CHARACTER_LOCAL_ASSET_DIR ?? path.join(process.cwd(), '.data', 'character-assets')
     )
   );
-  app.get(
-    '/health',
-    (_req: unknown, res: { json: (payload: { ok: boolean }) => void }) => {
-      res.json({ ok: true });
-    }
-  );
+  app.get('/health', (_req: unknown, res: { json: (payload: { ok: boolean }) => void }) => {
+    res.json({ ok: true });
+  });
   registerPaymentRoutes(app);
   registerCharacterGenerationRoutes(app);
   return app;

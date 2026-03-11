@@ -105,6 +105,24 @@ export const useWalletSession = () => {
     await AsyncStorage.removeItem(STORAGE_KEY);
   }, []);
 
+  const disconnectWallet = useCallback(async () => {
+    await clearSession();
+
+    if (wallet.account) {
+      await wallet.disconnect();
+    }
+  }, [clearSession, wallet]);
+
+  const switchWallet = useCallback(async () => {
+    await clearSession();
+
+    if (wallet.account) {
+      await wallet.disconnect();
+    }
+
+    return wallet.connect();
+  }, [clearSession, wallet]);
+
   const hasValidSession = useMemo(() => {
     return Boolean(storedSession && new Date(storedSession.expiresAt).getTime() > Date.now());
   }, [storedSession]);
@@ -117,5 +135,9 @@ export const useWalletSession = () => {
     hasValidSession,
     ensureAccessToken,
     clearSession,
+    disconnectWallet,
+    switchWallet,
   };
 };
+
+export type WalletSessionController = ReturnType<typeof useWalletSession>;
