@@ -131,8 +131,18 @@ export const ELON_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPrese
   require('../../assets/game/elon.png')
 );
 
+// Laddy sheet is 1024×571 (base design size) — use unscaled frame coords and transparent background.
+const LAD_FEET_TRIM_PX = 8;
 export const LAD_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
-  require('../../assets/game/laddy.png')
+  require('../../assets/game/laddy.png'),
+  { actions: BASE_ACTIONS, feetTrimPx: LAD_FEET_TRIM_PX }
+);
+
+// Degod sheet is 1024×571 (base design size), not 1376×768 — use unscaled frame coords.
+const DEGOD_FEET_TRIM_PX = 8;
+export const DEGOD_CHARACTER_PRESET: CharacterSpritePreset = createCharacterPreset(
+  require('../../assets/game/degod.png'),
+  { actions: BASE_ACTIONS, feetTrimPx: DEGOD_FEET_TRIM_PX }
 );
 
 export const CHARACTER_DEFINITIONS: readonly CharacterDefinition[] = [
@@ -165,6 +175,12 @@ export const CHARACTER_DEFINITIONS: readonly CharacterDefinition[] = [
     displayName: 'Mad Lad',
     previewOrder: 6,
     spritePreset: LAD_CHARACTER_PRESET,
+  },
+  {
+    id: 'degod',
+    displayName: 'Degod',
+    previewOrder: 7,
+    spritePreset: DEGOD_CHARACTER_PRESET,
   },
 ] as const;
 

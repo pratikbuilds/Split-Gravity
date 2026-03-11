@@ -15,7 +15,8 @@
     "db:push": "drizzle-kit push",
     "scripts:jobs": "node --env-file-if-exists=.env --import tsx scripts/list-generation-jobs.ts",
     "scripts:smoke-generation": "node --import tsx scripts/smoke-test-generation.ts",
-    "scripts:local-generation": "node --env-file-if-exists=.env --import tsx scripts/local-generation-with-wallet.ts"
+    "scripts:local-generation": "node --env-file-if-exists=.env --import tsx scripts/local-generation-with-wallet.ts",
+    "scripts:generation-with-reference": "node --env-file-if-exists=.env --import tsx scripts/generation-with-reference.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.888.0",

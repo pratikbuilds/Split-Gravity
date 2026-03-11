@@ -88,12 +88,20 @@ export const resolveGeneratedSpriteActions = (
   return buildFallbackFrames(imageWidth, imageHeight);
 };
 
-export const resolveSpriteAnchorX = (frame: SpriteFrame) => frame.anchorX ?? frame.width / 2;
+export const resolveSpriteAnchorX = (frame: SpriteFrame): number => {
+  'worklet';
+  return frame.anchorX ?? frame.width / 2;
+};
 
-export const resolveSpriteAnchorY = (frame: SpriteFrame) => frame.anchorY ?? frame.height;
+export const resolveSpriteAnchorY = (frame: SpriteFrame): number => {
+  'worklet';
+  return frame.anchorY ?? frame.height;
+};
 
-export const resolveSpriteReferenceHeight = (frame: SpriteFrame) =>
-  frame.referenceHeight ?? frame.height;
+export const resolveSpriteReferenceHeight = (frame: SpriteFrame): number => {
+  'worklet';
+  return frame.referenceHeight ?? frame.height;
+};
 
 export const resolveSpriteBasePosition = ({
   frame,
@@ -108,6 +116,7 @@ export const resolveSpriteBasePosition = ({
   worldAnchorX: number;
   worldAnchorY: number;
 }) => {
+  'worklet';
   const anchorX = resolveSpriteAnchorX(frame) * scale;
   const anchorY = resolveSpriteAnchorY(frame) * scale;
   const renderHeight = frame.height * scale;

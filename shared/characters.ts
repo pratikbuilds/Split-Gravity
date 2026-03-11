@@ -7,6 +7,7 @@ export const PRESET_CHARACTER_IDS = [
   'elon',
   'lad',
   'skieli',
+  'degod',
 ] as const;
 
 export const CHARACTER_IDS = [...PRESET_CHARACTER_IDS, 'custom'] as const;
