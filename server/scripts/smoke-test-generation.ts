@@ -4,6 +4,9 @@
  *
  *   BACKEND_URL=http://localhost:4100 ACCESS_TOKEN=<bearer-token> pnpm run scripts:smoke-generation
  *
+ * The backend now always applies its bundled run-cycle motion reference even
+ * for prompt-only jobs.
+ *
  * Get ACCESS_TOKEN by signing in via the app and copying the Bearer token from a backend request (network tab).
  */
 

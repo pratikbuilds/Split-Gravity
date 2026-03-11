@@ -1,6 +1,7 @@
 /**
  * Run character generation locally: wallet auth (devnet keypair) + optional payment + create job + poll.
  * Uses ~/.config/solana/id.json (or SOLANA_KEYPAIR_PATH) and SOLANA_RPC_HTTP for payment when required.
+ * The backend always adds its bundled run-cycle motion reference during generation.
  *
  * Requires: server running with Postgres (worker starts only when DB is reachable) and GEMINI_API_KEY set.
  *
@@ -34,6 +35,7 @@ const KEYPAIR_PATH =
 const OUTPUT_DIR = process.env.GENERATION_OUTPUT_DIR ?? path.join(process.cwd(), '.data', 'generation-output');
 
 const DEFAULT_PROMPT =
+  process.env.PROMPT ??
   'A simple 2D runner character, pixel art style, full body visible, neutral pose.';
 
 async function loadKeypair(filePath: string): Promise<Keypair> {

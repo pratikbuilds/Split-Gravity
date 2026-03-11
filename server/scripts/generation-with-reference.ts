@@ -4,6 +4,8 @@
  *   REFERENCE_IMAGE_PATH=/path/to/image.png pnpm run scripts:generation-with-reference
  *
  * Uses wallet auth (local-generation) or ACCESS_TOKEN (smoke-style).
+ * The backend will use the uploaded image for identity lock and attach its
+ * bundled run-cycle motion guide automatically.
  * Requires: server running with Postgres, GEMINI_API_KEY, CHARACTER_GENERATION_ENABLED=1.
  */
 
@@ -215,7 +217,7 @@ async function main() {
   };
   if (paymentIntentId) body.paymentIntentId = paymentIntentId;
 
-  console.log('Creating job with reference image and prompt:', PROMPT);
+  console.log('Creating job with identity reference image and bundled motion guide:', PROMPT);
   const createRes = await fetch(`${base}/character-generation/jobs`, {
     method: 'POST',
     headers,

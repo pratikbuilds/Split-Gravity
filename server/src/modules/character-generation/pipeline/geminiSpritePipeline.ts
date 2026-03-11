@@ -1,8 +1,10 @@
+import { readFile } from 'node:fs/promises';
 import { GoogleGenAI, Type } from '@google/genai';
 import { env } from '../../../config/env';
 import type { CharacterGenerationSourceType } from '../../../shared/character-generation-contracts';
-import { applyMagentaTransparency, createThumbnail } from './imageProcessing';
+import { removeKeyedBackground, createThumbnail } from './imageProcessing';
 import { analyzeGeneratedSpriteSheet } from './generatedSpriteSheetMetadata';
+import { PNG } from 'pngjs';
 
 type GenerateSpriteSheetArgs = {
   prompt: string | null;
@@ -28,6 +30,16 @@ type GridCheckResult = {
   runRowArcadeSprintReadable: boolean;
 };
 
+type InlineImagePart = {
+  inlineData: {
+    mimeType: string;
+    data: string;
+  };
+};
+
+const RUN_CYCLE_REFERENCE_ASSET_URL = new URL('./assets/run_cycle_ref.png', import.meta.url);
+let bundledRunCycleReferencePromise: Promise<InlineImagePart> | null = null;
+
 const extractFirstJsonObject = (raw: string): string | null => {
   const start = raw.indexOf('{');
   const end = raw.lastIndexOf('}');
@@ -44,6 +56,59 @@ const parseDataUrlImage = (imageBase64: string): { mimeType: string; data: strin
   return {
     mimeType: 'image/png',
     data: imageBase64,
+  };
+};
+
+const loadBundledRunCycleReference = async (): Promise<InlineImagePart> => {
+  if (!bundledRunCycleReferencePromise) {
+    bundledRunCycleReferencePromise = readFile(RUN_CYCLE_REFERENCE_ASSET_URL).then((buffer) => ({
+      inlineData: {
+        mimeType: 'image/png',
+        data: buffer.toString('base64'),
+      },
+    }));
+  }
+
+  return bundledRunCycleReferencePromise;
+};
+
+export const detectGridDividerArtifacts = (buffer: Buffer) => {
+  const png = PNG.sync.read(buffer);
+  const cellWidth = Math.floor(png.width / 6);
+  const cellHeight = Math.floor(png.height / 3);
+  const alphaThreshold = 48;
+  const verticalLines = [1, 2, 3, 4, 5].map((index) => index * cellWidth);
+  const horizontalLines = [1, 2].map((index) => index * cellHeight);
+
+  const lineOpacityRatio = (
+    isVertical: boolean,
+    linePosition: number,
+    length: number
+  ) => {
+    let opaqueCount = 0;
+    let total = 0;
+
+    for (let offset = 0; offset < length; offset += 1) {
+      const x = isVertical ? Math.min(png.width - 1, linePosition) : offset;
+      const y = isVertical ? offset : Math.min(png.height - 1, linePosition);
+      const alpha = png.data[(y * png.width + x) * 4 + 3] ?? 0;
+      if (alpha > alphaThreshold) opaqueCount += 1;
+      total += 1;
+    }
+
+    return total === 0 ? 0 : opaqueCount / total;
+  };
+
+  const verticalOpacityRatios = verticalLines.map((x) => lineOpacityRatio(true, x, png.height));
+  const horizontalOpacityRatios = horizontalLines.map((y) => lineOpacityRatio(false, y, png.width));
+  const maxVerticalDividerOpacity = Math.max(...verticalOpacityRatios, 0);
+  const maxHorizontalDividerOpacity = Math.max(...horizontalOpacityRatios, 0);
+
+  return {
+    maxVerticalDividerOpacity,
+    maxHorizontalDividerOpacity,
+    hasDividerArtifacts:
+      maxVerticalDividerOpacity >= 0.8 || maxHorizontalDividerOpacity >= 0.8,
   };
 };
 
@@ -145,24 +210,37 @@ const inspectSpriteSheetGrid = async (
 
 export const buildPrompt = (prompt: string | null, sourceType: CharacterGenerationSourceType) => {
   const subject = prompt?.trim() || 'reference character';
-  const referenceLine =
+  const identityReferenceLine =
     sourceType === 'image'
-      ? 'Preserve the uploaded character identity exactly across every frame.'
-      : 'Create an original readable character design.';
+      ? 'If an uploaded character reference image is attached, it is the exact same character. Preserve the uploaded character identity exactly across every frame and do not redesign the silhouette, outfit, face, or signature markings.'
+      : 'No uploaded character reference image is attached. Create an original readable character design that stays visually consistent across all 18 frames.';
 
-  return `Create one 6x3 sprite sheet image for a side-scrolling gravity jump game.
+  return `Create ONE sprite sheet image for a gravity jump game player character.
 SUBJECT: ${subject}
-${referenceLine}
-Rules:
-- Exactly 6 columns x 3 rows, row order RUN, JUMP, IDLE.
-- Every frame full body from head to feet.
-- Background must be flat #FF00FF only.
-- No text, UI, borders, grid lines, logos, or watermark.
-- Keep framing and character scale consistent across all 18 frames.
-- Run row is a readable exaggerated arcade sprint: obvious left/right leg interchange, clear contact/passing/push phases, and strong opposite arm swing in every frame.
-- Jump row is launch, ascent, peak, descent, landing, recovery.
-- Idle row is subtle breathing only above the pelvis. Feet stay planted to one baseline and the pelvis stays locked with no side-to-side or forward/back drift.
-Return only the final image.`;
+
+IDENTITY LOCK:
+${identityReferenceLine}
+
+MOTION GUIDE:
+- A separate attached run-cycle reference image is provided by the backend.
+- Use that motion reference only for the RUN row pose sequence, leg timing, and arm timing.
+- Match the run-row leg and arm positions, timing, and frame order from the motion reference as closely as possible.
+- Do NOT copy the motion reference character's design, colors, clothing, face, or accessories. It is a motion-only guide.
+
+SPRITE SHEET STRUCTURE:
+- Exactly 6 columns x 3 rows, with row order RUN, JUMP, IDLE.
+- Every frame is full body from head to feet with consistent character scale and fixed camera distance.
+- The character torso stays centered horizontally in every frame.
+- Background must be one flat solid #FF00FF with no separator lines, borders, or cell dividers.
+- No text, numbers, UI, logos, watermark, shadows, particles, or decorative extras.
+
+ROW REQUIREMENTS:
+- RUN row is a readable exaggerated arcade sprint with unmistakable left/right leg interchange, clear contact/passing/push phases, and strong opposite arm swing in every frame.
+- JUMP row is launch, ascent, peak, descent, landing, recovery. Character size stays consistent while vertical position changes.
+- IDLE row is subtle breathing only above the pelvis. Feet stay planted to one baseline and the pelvis stays locked with no side-to-side or forward/back drift.
+
+FINAL OUTPUT:
+- Return only the final sprite sheet image.`;
 };
 
 export class GeminiSpritePipeline {
@@ -183,16 +261,17 @@ export class GeminiSpritePipeline {
   }: GenerateSpriteSheetArgs) {
     const maxAttempts = 3;
     let correction = '';
+    const bundledRunCycleReference = await loadBundledRunCycleReference();
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const parts: ({ text: string } | { inlineData: { mimeType: string; data: string } })[] = [
-        { text: buildPrompt(prompt, sourceType) },
-      ];
+      const parts: ({ text: string } | InlineImagePart)[] = [{ text: buildPrompt(prompt, sourceType) }];
 
       if (referenceImageDataUrl) {
         const { mimeType, data } = parseDataUrlImage(referenceImageDataUrl);
         parts.push({ inlineData: { mimeType, data } });
       }
+
+      parts.push(bundledRunCycleReference);
 
       if (correction) {
         parts.push({ text: correction });
@@ -219,10 +298,11 @@ export class GeminiSpritePipeline {
       }
 
       const rawBuffer = Buffer.from(imagePart.inlineData.data, 'base64');
-      const processedBuffer = applyMagentaTransparency(rawBuffer);
+      const processedBuffer = removeKeyedBackground(rawBuffer);
       const processedDataUrl = `data:image/png;base64,${processedBuffer.toString('base64')}`;
       const inspection = await inspectSpriteSheetGrid(this.client, processedDataUrl);
       const layoutAnalysis = analyzeGeneratedSpriteSheet(processedBuffer);
+      const dividerArtifacts = detectGridDividerArtifacts(processedBuffer);
       const idlePixelBaselineStable = layoutAnalysis.diagnostics.idleBaselineRange <= 6;
       const idlePixelCenterStable = layoutAnalysis.diagnostics.idleLowerBodyCenterRange <= 10;
       const isCompliant =
@@ -241,6 +321,7 @@ export class GeminiSpritePipeline {
         inspection.runRowLegInterchangeClear &&
         inspection.runRowArmSwingVisible &&
         inspection.runRowArcadeSprintReadable &&
+        !dividerArtifacts.hasDividerArtifacts &&
         idlePixelBaselineStable &&
         idlePixelCenterStable;
 
@@ -291,6 +372,9 @@ export class GeminiSpritePipeline {
       }
       if (!inspection.runRowArcadeSprintReadable) {
         failedChecks.push('arcade sprint readability');
+      }
+      if (dividerArtifacts.hasDividerArtifacts) {
+        failedChecks.push('no cell divider or grid line artifacts');
       }
       if (!idlePixelBaselineStable) failedChecks.push('pixel-detected idle baseline drift');
       if (!idlePixelCenterStable) failedChecks.push('pixel-detected idle pelvis drift');

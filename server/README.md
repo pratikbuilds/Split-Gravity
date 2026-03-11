@@ -62,6 +62,13 @@ Copy `server/.env.example` and set:
 - `CHARACTER_LOCAL_ASSET_DIR`: optional local output directory for generated sprite and thumbnail PNGs.
 - `CHARACTER_BUCKET_*`: optional S3-compatible storage settings. If omitted, the backend now falls back to local file storage and serves assets from `/character-assets/*`.
 
+## Character Generation Notes
+
+- The public API still accepts only the user prompt and optional `referenceImageDataUrl`.
+- When `referenceImageDataUrl` is provided, the backend treats it as the identity reference and preserves that character design across all frames.
+- The backend now also attaches a bundled run-cycle reference image internally on every generation job to improve run-row motion consistency.
+- Generated sheets now go through background color detection, alpha reconstruction, and magenta despill cleanup before thumbnails and animation metadata are produced.
+
 ## Payment Model
 
 Current direction:
