@@ -179,6 +179,29 @@ export const startServer = async () => {
     queueEntryIdBySocketId.set(entry.socketId, entry.id);
   };
 
+  const resolveAuthorizedCustomCharacterVersion = async (input: {
+    characterId: string;
+    customCharacterVersionId?: string;
+    accessToken?: string;
+    expectedPlayerId?: string;
+  }) => {
+    if (input.characterId !== 'custom') {
+      return undefined;
+    }
+
+    if (!input.customCharacterVersionId) {
+      throw new Error('Custom runner selection is missing its saved version.');
+    }
+
+    const ownedVersion = await characterGenerationService.assertOwnedVersion(
+      input.accessToken,
+      input.customCharacterVersionId,
+      input.expectedPlayerId
+    );
+
+    return ownedVersion.version.id;
+  };
+
   const refundPaidRoom = async (room: Room, description: string) => {
     if (
       (room.roomKind !== 'paid_private' && room.roomKind !== 'paid_queue') ||
@@ -499,7 +522,7 @@ export const startServer = async () => {
 
     socket.on(
       'room:create',
-      ({
+      async ({
         nickname,
         clientId,
         characterId,
@@ -565,6 +588,25 @@ export const startServer = async () => {
           }
         }
 
+        let safeCustomCharacterVersionId: string | undefined;
+        try {
+          safeCustomCharacterVersionId = await resolveAuthorizedCustomCharacterVersion({
+            characterId: safeCharacterId,
+            customCharacterVersionId,
+            accessToken,
+            expectedPlayerId: walletPlayerId,
+          });
+        } catch (error) {
+          socket.emit('error', {
+            code: 'CUSTOM_CHARACTER_UNAUTHORIZED',
+            message:
+              error instanceof Error
+                ? error.message
+                : 'Unable to validate the selected custom runner.',
+          });
+          return;
+        }
+
         const playerId = randomUUID();
         const room: Room = {
           roomCode,
@@ -586,7 +628,7 @@ export const startServer = async () => {
           clientId,
           nickname: sanitizeNickname(nickname, 'Player 1'),
           characterId: safeCharacterId,
-          customCharacterVersionId,
+          customCharacterVersionId: safeCustomCharacterVersionId,
           alive: true,
           connected: true,
           socketId: socket.id,
@@ -627,7 +669,7 @@ export const startServer = async () => {
 
     socket.on(
       'room:join',
-      ({
+      async ({
         roomCode,
         nickname,
         clientId,
@@ -705,6 +747,25 @@ export const startServer = async () => {
         let player = playerId ? room.players.get(playerId) : undefined;
 
         if (player) {
+          let safeCustomCharacterVersionId: string | undefined;
+          try {
+            safeCustomCharacterVersionId = await resolveAuthorizedCustomCharacterVersion({
+              characterId: safeCharacterId,
+              customCharacterVersionId,
+              accessToken,
+              expectedPlayerId: player.walletPlayerId,
+            });
+          } catch (error) {
+            socket.emit('error', {
+              code: 'CUSTOM_CHARACTER_UNAUTHORIZED',
+              message:
+                error instanceof Error
+                  ? error.message
+                  : 'Unable to validate the selected custom runner.',
+            });
+            return;
+          }
+
           if (player.socketId !== socket.id) {
             socketIndex.delete(player.socketId);
           }
@@ -713,7 +774,7 @@ export const startServer = async () => {
           player.lastSeenAt = Date.now();
           player.nickname = sanitizeNickname(nickname, player.nickname);
           player.characterId = safeCharacterId;
-          player.customCharacterVersionId = customCharacterVersionId;
+          player.customCharacterVersionId = safeCustomCharacterVersionId;
           clearPlayerTimers(player);
           if (
             (room.roomKind === 'paid_private' || room.roomKind === 'paid_queue') &&
@@ -778,13 +839,32 @@ export const startServer = async () => {
           }
         }
 
+        let safeCustomCharacterVersionId: string | undefined;
+        try {
+          safeCustomCharacterVersionId = await resolveAuthorizedCustomCharacterVersion({
+            characterId: safeCharacterId,
+            customCharacterVersionId,
+            accessToken,
+            expectedPlayerId: walletPlayerId,
+          });
+        } catch (error) {
+          socket.emit('error', {
+            code: 'CUSTOM_CHARACTER_UNAUTHORIZED',
+            message:
+              error instanceof Error
+                ? error.message
+                : 'Unable to validate the selected custom runner.',
+          });
+          return;
+        }
+
         playerId = randomUUID();
         player = {
           playerId,
           clientId,
           nickname: sanitizeNickname(nickname, 'Player 2'),
           characterId: safeCharacterId,
-          customCharacterVersionId,
+          customCharacterVersionId: safeCustomCharacterVersionId,
           alive: true,
           connected: true,
           socketId: socket.id,
@@ -867,6 +947,25 @@ export const startServer = async () => {
           return;
         }
 
+        let safeCustomCharacterVersionId: string | undefined;
+        try {
+          safeCustomCharacterVersionId = await resolveAuthorizedCustomCharacterVersion({
+            characterId: isCharacterId(characterId) ? characterId : DEFAULT_CHARACTER_ID,
+            customCharacterVersionId,
+            accessToken,
+            expectedPlayerId: walletPlayerId,
+          });
+        } catch (error) {
+          socket.emit('error', {
+            code: 'CUSTOM_CHARACTER_UNAUTHORIZED',
+            message:
+              error instanceof Error
+                ? error.message
+                : 'Unable to validate the selected custom runner.',
+          });
+          return;
+        }
+
         if (existingQueueEntry) {
           const isSameEntry =
             existingQueueEntry.paymentIntentId === paymentIntentId &&
@@ -915,7 +1014,7 @@ export const startServer = async () => {
           clientId,
           nickname: sanitizeNickname(nickname, 'Player'),
           characterId: isCharacterId(characterId) ? characterId : DEFAULT_CHARACTER_ID,
-          customCharacterVersionId,
+          customCharacterVersionId: safeCustomCharacterVersionId,
           walletPlayerId,
           tokenId,
           entryFeeTierId,

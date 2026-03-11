@@ -190,11 +190,21 @@ export class CharacterGenerationRepository {
   }
 
   async activateCharacter(playerId: string, characterId: string) {
+    const [character] = await db
+      .select()
+      .from(customCharacters)
+      .where(and(eq(customCharacters.id, characterId), eq(customCharacters.playerId, playerId)))
+      .limit(1);
+
+    if (!character) {
+      return null;
+    }
+
     const [version] = await db
       .select()
       .from(customCharacterVersions)
-      .where(eq(customCharacterVersions.customCharacterId, characterId))
-      .orderBy(desc(customCharacterVersions.createdAt))
+      .where(eq(customCharacterVersions.customCharacterId, character.id))
+      .orderBy(desc(customCharacterVersions.createdAt), desc(customCharacterVersions.id))
       .limit(1);
 
     if (!version) {
@@ -218,6 +228,29 @@ export class CharacterGenerationRepository {
       });
 
     return version;
+  }
+
+  async getOwnedVersion(playerId: string, versionId: string) {
+    const [version] = await db
+      .select({
+        version: customCharacterVersions,
+        character: customCharacters,
+      })
+      .from(customCharacterVersions)
+      .innerJoin(
+        customCharacters,
+        eq(customCharacters.id, customCharacterVersions.customCharacterId)
+      )
+      .where(
+        and(
+          eq(customCharacterVersions.id, versionId),
+          eq(customCharacters.playerId, playerId),
+          isNull(customCharacters.archivedAt)
+        )
+      )
+      .limit(1);
+
+    return version ?? null;
   }
 
   async getPublicVersion(versionId: string) {

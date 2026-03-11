@@ -60,7 +60,14 @@ Copy `server/.env.example` and set:
 - `CHARACTER_GENERATION_ENABLED`: set to `1` to enable the AI Runner Lab endpoints.
 - `GEMINI_API_KEY`: required by the Gemini sprite generation pipeline.
 - `CHARACTER_LOCAL_ASSET_DIR`: optional local output directory for generated sprite and thumbnail PNGs.
-- `CHARACTER_BUCKET_*`: optional S3-compatible storage settings. If omitted, the backend now falls back to local file storage and serves assets from `/character-assets/*`.
+- `CHARACTER_BUCKET_*`: optional S3-compatible storage settings. If omitted, the backend falls back to local file storage and serves assets from `/character-assets/*`. That fallback is fine locally, but on Railway it means generated characters are stored on ephemeral disk and can disappear after deploys/restarts.
+- Railway bucket credential mapping:
+  - `CHARACTER_BUCKET_NAME` <- `BUCKET`
+  - `CHARACTER_BUCKET_ENDPOINT` <- `ENDPOINT`
+  - `CHARACTER_BUCKET_REGION` <- `REGION`
+  - `CHARACTER_BUCKET_ACCESS_KEY` <- `ACCESS_KEY_ID`
+  - `CHARACTER_BUCKET_SECRET_KEY` <- `SECRET_ACCESS_KEY`
+  - `CHARACTER_BUCKET_SIGNED_URLS=1` is the safe default for private Railway buckets
 
 ## Character Generation Notes
 
@@ -68,6 +75,8 @@ Copy `server/.env.example` and set:
 - When `referenceImageDataUrl` is provided, the backend treats it as the identity reference and preserves that character design across all frames.
 - The backend now also attaches a bundled run-cycle reference image internally on every generation job to improve run-row motion consistency.
 - Generated sheets now go through background color detection, alpha reconstruction, and magenta despill cleanup before thumbnails and animation metadata are produced.
+- `/custom-characters` returns only the authenticated wallet's non-archived characters.
+- Custom runner activation and multiplayer usage are owner-gated: the wallet session must own the selected custom character version or the backend rejects it.
 
 ## Payment Model
 

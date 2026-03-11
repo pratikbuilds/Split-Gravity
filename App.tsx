@@ -57,12 +57,40 @@ import {
   MultiplayerMatchController,
   type MultiplayerViewState,
 } from './services/multiplayer/matchController';
+import { useWalletSession } from './hooks/useWalletSession';
 
 import './global.css';
 
 const TERRAIN_THEMES: TerrainTheme[] = ['grass', 'purple', 'stone'];
 const SELECTED_CHARACTER_STORAGE_KEY = 'my-expo-app:selected-character-id';
 const SELECTED_CUSTOM_CHARACTER_STORAGE_KEY = 'my-expo-app:selected-custom-character';
+
+type StoredSelectedCustomCharacter = {
+  character: CustomCharacterSummary;
+  walletAddress: string;
+};
+
+const parseStoredSelectedCustomCharacter = (raw: string): StoredSelectedCustomCharacter | null => {
+  try {
+    const parsed = JSON.parse(raw) as StoredSelectedCustomCharacter | CustomCharacterSummary;
+    if ('character' in parsed && 'walletAddress' in parsed) {
+      return parsed;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const serializeStoredSelectedCustomCharacter = (
+  character: CustomCharacterSummary,
+  walletAddress: string
+) =>
+  JSON.stringify({
+    character,
+    walletAddress,
+  } satisfies StoredSelectedCustomCharacter);
 
 function getRandomTerrainTheme(previousTheme?: TerrainTheme): TerrainTheme {
   if (TERRAIN_THEMES.length === 1) return TERRAIN_THEMES[0];
@@ -134,6 +162,7 @@ const getErrorMessage = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : fallback;
 
 function AppContent() {
+  const walletSession = useWalletSession();
   const [screen, setScreen] = useState<HomeScreenRoute>('home');
   const [mode, setMode] = useState<GameMode>('single_practice');
   const [gameKey, setGameKey] = useState(0);
@@ -306,6 +335,10 @@ function AppContent() {
     let active = true;
 
     const hydrateSelectedCharacter = async () => {
+      if (walletSession.loading) {
+        return;
+      }
+
       try {
         const storedCharacterId = await AsyncStorage.getItem(SELECTED_CHARACTER_STORAGE_KEY);
         const storedCustomCharacter = await AsyncStorage.getItem(
@@ -314,9 +347,33 @@ function AppContent() {
         if (!active || !storedCharacterId) return;
 
         if (isCharacterId(storedCharacterId)) {
+          if (storedCharacterId === 'custom') {
+            const parsedCustomCharacter = storedCustomCharacter
+              ? parseStoredSelectedCustomCharacter(storedCustomCharacter)
+              : null;
+            const currentWalletAddress = walletSession.storedSession?.walletAddress ?? null;
+
+            if (
+              !parsedCustomCharacter ||
+              !currentWalletAddress ||
+              parsedCustomCharacter.walletAddress !== currentWalletAddress
+            ) {
+              await AsyncStorage.removeItem(SELECTED_CUSTOM_CHARACTER_STORAGE_KEY);
+              await AsyncStorage.setItem(SELECTED_CHARACTER_STORAGE_KEY, DEFAULT_CHARACTER_ID);
+              if (active) {
+                setSelectedCharacterId(DEFAULT_CHARACTER_ID);
+                setSelectedCustomCharacter(null);
+              }
+              return;
+            }
+          }
+
           setSelectedCharacterId(storedCharacterId);
           if (storedCharacterId === 'custom' && storedCustomCharacter) {
-            setSelectedCustomCharacter(JSON.parse(storedCustomCharacter) as CustomCharacterSummary);
+            const parsedCustomCharacter = parseStoredSelectedCustomCharacter(storedCustomCharacter);
+            if (parsedCustomCharacter) {
+              setSelectedCustomCharacter(parsedCustomCharacter.character);
+            }
           }
           return;
         }
@@ -332,7 +389,22 @@ function AppContent() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [walletSession.loading, walletSession.storedSession?.walletAddress]);
+
+  useEffect(() => {
+    const currentWalletAddress = walletSession.storedSession?.walletAddress ?? null;
+    if (selectedCharacterId !== 'custom') return;
+    if (!selectedCustomCharacter || !currentWalletAddress) {
+      setSelectedCharacterId(DEFAULT_CHARACTER_ID);
+      setSelectedCustomCharacter(null);
+      void AsyncStorage.setItem(SELECTED_CHARACTER_STORAGE_KEY, DEFAULT_CHARACTER_ID);
+      void AsyncStorage.removeItem(SELECTED_CUSTOM_CHARACTER_STORAGE_KEY);
+    }
+  }, [
+    selectedCharacterId,
+    selectedCustomCharacter,
+    walletSession.storedSession?.walletAddress,
+  ]);
 
   useEffect(() => {
     const unsubscribe = multiplayerController.subscribe((state) => {
@@ -386,7 +458,10 @@ function AppContent() {
         setSelectedCustomCharacter(refreshedCharacter);
         await AsyncStorage.setItem(
           SELECTED_CUSTOM_CHARACTER_STORAGE_KEY,
-          JSON.stringify(refreshedCharacter)
+          serializeStoredSelectedCustomCharacter(
+            refreshedCharacter,
+            walletSession.storedSession?.walletAddress ?? ''
+          )
         );
       })
       .catch((error) => {
@@ -398,7 +473,11 @@ function AppContent() {
     return () => {
       active = false;
     };
-  }, [selectedCharacterId, selectedCustomCharacter?.activeVersionId]);
+  }, [
+    selectedCharacterId,
+    selectedCustomCharacter?.activeVersionId,
+    walletSession.storedSession?.walletAddress,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -630,7 +709,10 @@ function AppContent() {
         if (characterId === 'custom' && customCharacter) {
           await AsyncStorage.setItem(
             SELECTED_CUSTOM_CHARACTER_STORAGE_KEY,
-            JSON.stringify(customCharacter)
+            serializeStoredSelectedCustomCharacter(
+              customCharacter,
+              walletSession.storedSession?.walletAddress ?? ''
+            )
           );
         } else {
           await AsyncStorage.removeItem(SELECTED_CUSTOM_CHARACTER_STORAGE_KEY);
@@ -639,7 +721,7 @@ function AppContent() {
         console.warn('Persisting character selection failed:', error);
       }
     },
-    []
+    [walletSession.storedSession?.walletAddress]
   );
 
   const handleExitToHome = () => {

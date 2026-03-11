@@ -17,6 +17,7 @@ import { GeminiSpritePipeline } from '../pipeline/geminiSpritePipeline';
 import { CharacterGenerationRepository } from '../repositories/characterGenerationRepository';
 import { CharacterGenerationQueue } from '../jobs/characterGenerationQueue';
 import { getCharacterAssetStorage } from '../storage';
+import { buildLatestVersionByCharacterId } from '../gallery';
 import {
   buildAnimationObjectKey,
   buildAnimationObjectKeyFromSheet,
@@ -222,9 +223,7 @@ export class CharacterGenerationService {
       session.playerId
     );
 
-    const versionByCharacterId = new Map(
-      versions.map((version) => [version.customCharacterId, version])
-    );
+    const versionByCharacterId = buildLatestVersionByCharacterId(versions);
 
     const result = await Promise.all(
       characters.map(async (character): Promise<CustomCharacterSummary | null> => {
@@ -249,6 +248,24 @@ export class CharacterGenerationService {
     );
 
     return result.filter((value): value is CustomCharacterSummary => value != null);
+  }
+
+  async assertOwnedVersion(
+    accessToken: string | undefined,
+    versionId: string,
+    expectedPlayerId?: string
+  ) {
+    const session = paymentService.requireSession(accessToken);
+    if (expectedPlayerId && session.playerId !== expectedPlayerId) {
+      throw new Error('Custom runner session does not match the funded wallet.');
+    }
+
+    const ownedVersion = await this.repository.getOwnedVersion(session.playerId, versionId);
+    if (!ownedVersion) {
+      throw new Error('Custom runner does not belong to this wallet.');
+    }
+
+    return ownedVersion;
   }
 
   async registerPushToken(

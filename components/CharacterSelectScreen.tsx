@@ -141,9 +141,17 @@ export const CharacterSelectScreen = ({
     if (gallery.loading) return 'Refreshing your AI runners...';
     if (!gallery.walletSession.walletAddress)
       return 'Connect wallet to load your generated runners.';
+    if (!gallery.walletSession.hasValidSession)
+      return 'Sign in with this wallet to load your saved AI runners.';
     if (aiCharacters.length === 0) return 'No AI runners yet. Open the lab to make your first one.';
     return `${aiCharacters.length} AI runner${aiCharacters.length === 1 ? '' : 's'} ready to use.`;
-  }, [aiCharacters.length, gallery.error, gallery.loading, gallery.walletSession.walletAddress]);
+  }, [
+    aiCharacters.length,
+    gallery.error,
+    gallery.loading,
+    gallery.walletSession.hasValidSession,
+    gallery.walletSession.walletAddress,
+  ]);
 
   const renderRunnerItem = useCallback(
     ({ item }: { item: RunnerListItem }) => {
@@ -297,13 +305,19 @@ export const CharacterSelectScreen = ({
           </Text>
           <Pressable
             onPress={() =>
-              void (gallery.walletSession.walletAddress
-                ? gallery.refresh()
-                : gallery.walletSession.connect())
+              void (!gallery.walletSession.walletAddress
+                ? gallery.walletSession.connect()
+                : !gallery.walletSession.hasValidSession
+                  ? gallery.walletSession.ensureAccessToken().then(() => gallery.refresh())
+                  : gallery.refresh())
             }
             className="rounded-full border border-white/10 bg-white/5 px-3 py-2 active:bg-white/10">
             <Text className="text-[11px] font-black uppercase tracking-[1.5px] text-slate-200">
-              {gallery.walletSession.walletAddress ? 'Refresh' : 'Connect'}
+              {!gallery.walletSession.walletAddress
+                ? 'Connect'
+                : !gallery.walletSession.hasValidSession
+                  ? 'Sign In'
+                  : 'Refresh'}
             </Text>
           </Pressable>
         </View>
