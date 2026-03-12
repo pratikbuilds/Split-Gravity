@@ -51,6 +51,9 @@ export interface MatchResult {
   loserPlayerId: string;
   reason: MatchResultReason;
   endedAt: number;
+  /** Distance (score) in metres for winner and loser when available */
+  winnerScore?: number;
+  loserScore?: number;
   settlementTransactionSignature?: string | null;
 }
 

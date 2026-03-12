@@ -646,6 +646,13 @@ export class MultiplayerMatchController {
     });
   }
 
+  /** Clear match result and stay in room (for rematch flow). */
+  dismissResult() {
+    if (this.state.multiplayerResult == null) return;
+    this.setState({ multiplayerResult: null });
+    this.emitState();
+  }
+
   resetLobbyState() {
     this.clearCountdownTimer();
     this.pendingCreate = null;

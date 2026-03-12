@@ -35,6 +35,8 @@ import { characterGenerationService } from '../modules/character-generation';
 const PORT = env.PORT;
 const RECONNECT_GRACE_MS = 10_000;
 const ROOM_TTL_MS = 2 * 60 * 1000;
+/** Time before an ended match room is cleaned up if no rematch */
+const REMATCH_LOBBY_TTL_MS = 2 * 60 * 1000;
 const START_COUNTDOWN_MS = 2_000;
 const MAX_DELTA_SCROLL_PER_MS = 0.5;
 const LOG_STATE_EVENTS = env.LOG_STATE_EVENTS;
@@ -287,7 +289,8 @@ export const startServer = async () => {
     room: Room,
     winnerPlayerId: string,
     loserPlayerId: string,
-    reason: MatchResult['reason']
+    reason: MatchResult['reason'],
+    deathScores?: { loserScore: number }
   ) => {
     if (room.state === 'ENDED') {
       logAt('warn', 'match.end.ignored_already_ended', {
@@ -304,11 +307,25 @@ export const startServer = async () => {
     for (const player of room.players.values()) {
       clearPlayerTimers(player);
     }
+
+    const winner = room.players.get(winnerPlayerId);
+    const loser = room.players.get(loserPlayerId);
+    const winnerScore =
+      winner?.lastState?.score != null ? Math.round(winner.lastState.score) : undefined;
+    const loserScore =
+      deathScores?.loserScore != null
+        ? Math.round(deathScores.loserScore)
+        : loser?.lastState?.score != null
+          ? Math.round(loser.lastState.score)
+          : undefined;
+
     room.result = {
       winnerPlayerId,
       loserPlayerId,
       reason,
       endedAt: Date.now(),
+      ...(winnerScore != null && { winnerScore }),
+      ...(loserScore != null && { loserScore }),
     };
 
     if (
@@ -346,8 +363,15 @@ export const startServer = async () => {
       reason,
       endedAt: room.result.endedAt,
     });
+
+    room.state = 'ROOM_FULL';
+    room.readyPlayerIds.clear();
+    room.result = undefined;
+    for (const p of room.players.values()) {
+      p.alive = true;
+    }
     emitRoomState(room);
-    scheduleRoomCleanup(room, 15_000);
+    scheduleRoomCleanup(room, REMATCH_LOBBY_TTL_MS);
   };
 
   const startMatchIfReady = (room: Room) => {
@@ -375,6 +399,11 @@ export const startServer = async () => {
         funded: room.fundedPlayerIds.size,
       });
       return;
+    }
+
+    clearRoomCleanup(room);
+    for (const p of room.players.values()) {
+      p.alive = true;
     }
 
     room.state = 'COUNTDOWN';
@@ -1391,7 +1420,9 @@ export const startServer = async () => {
       if (!opponent) return;
 
       runInBackground(
-        endMatch(room, opponent.playerId, player.playerId, 'death'),
+        endMatch(room, opponent.playerId, player.playerId, 'death', {
+          loserScore: score,
+        }),
         'match.end.background_failed',
         {
           roomCode: room.roomCode,

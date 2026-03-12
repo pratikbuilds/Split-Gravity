@@ -55,6 +55,9 @@ export interface MultiplayerResult {
   loserPlayerId: string;
   reason: MultiplayerResultReason;
   endedAt: number;
+  /** Distance (m) for winner and loser when available */
+  winnerScore?: number;
+  loserScore?: number;
   settlementTransactionSignature?: string | null;
 }
 

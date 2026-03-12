@@ -511,6 +511,29 @@ function AppContent() {
   }, [multiplayerState.opponent?.characterId, multiplayerState.opponent?.customCharacterVersionId]);
 
   useEffect(() => {
+    if (!mode.startsWith('multi_')) return;
+    const urls: string[] = [];
+    if (selectedCharacterId === 'custom' && selectedCustomCharacter?.asset.sheetUrl) {
+      urls.push(selectedCustomCharacter.asset.sheetUrl);
+    }
+    if (
+      multiplayerState.opponent?.characterId === 'custom' &&
+      opponentCustomCharacter?.asset.sheetUrl
+    ) {
+      urls.push(opponentCustomCharacter.asset.sheetUrl);
+    }
+    if (urls.length === 0) return;
+    void preloadSkiaImages(urls);
+  }, [
+    mode,
+    selectedCharacterId,
+    selectedCustomCharacter?.asset.sheetUrl,
+    multiplayerState.opponent?.characterId,
+    opponentCustomCharacter?.asset.sheetUrl,
+    preloadSkiaImages,
+  ]);
+
+  useEffect(() => {
     if (screen !== 'character_select') return;
 
     const task = InteractionManager.runAfterInteractions(() => {
@@ -541,12 +564,29 @@ function AppContent() {
         : Math.floor(Math.random() * 0x7fffffff)
     );
     setGameKey((k) => k + 1);
-    setScreen('game');
-    void Promise.all([
-      preloadGameEnvironment(),
-      preloadCharacters([selectedCharacterId, multiplayerState.opponent?.characterId]),
-      ensureAudioReady(),
-    ]);
+
+    const customSheetUrls: string[] = [];
+    if (selectedCharacterId === 'custom' && selectedCustomCharacter?.asset.sheetUrl) {
+      customSheetUrls.push(selectedCustomCharacter.asset.sheetUrl);
+    }
+    if (
+      multiplayerState.opponent?.characterId === 'custom' &&
+      opponentCustomCharacter?.asset.sheetUrl
+    ) {
+      customSheetUrls.push(opponentCustomCharacter.asset.sheetUrl);
+    }
+
+    const run = async () => {
+      await preloadGameEnvironment();
+      await preloadCharacters([selectedCharacterId, multiplayerState.opponent?.characterId]);
+      if (customSheetUrls.length > 0) {
+        await preloadSkiaImages(customSheetUrls);
+      }
+      await ensureAudioReady();
+      if (!mountedRef.current) return;
+      setScreen('game');
+    };
+    void run();
   }, [
     hasMultiplayerPair,
     mode,
@@ -556,7 +596,10 @@ function AppContent() {
     ensureAudioReady,
     preloadGameEnvironment,
     preloadCharacters,
+    preloadSkiaImages,
     selectedCharacterId,
+    selectedCustomCharacter?.asset.sheetUrl,
+    opponentCustomCharacter?.asset.sheetUrl,
   ]);
 
   useEffect(() => {
@@ -1204,9 +1247,27 @@ function AppContent() {
                     <View style={styles.gameOverBackdrop} />
                     <View style={styles.gameOverModal}>
                       <Text style={styles.gameOverTitle}>{didWin ? 'You Win' : 'You Lose'}</Text>
-                      <Text style={styles.gameOverSubtitle}>
-                        Reason: {multiplayerResult.reason}
-                      </Text>
+                      <Text style={styles.gameOverSubtitle}>Distance</Text>
+                      <View style={styles.scoreCardRow}>
+                        <Text style={styles.scoreCardLabel}>
+                          {multiplayerResult.winnerPlayerId === localPlayerId ? 'You' : multiplayerState.opponent?.nickname ?? 'Winner'}
+                        </Text>
+                        <Text style={styles.scoreCardValue}>
+                          {multiplayerResult.winnerScore != null
+                            ? `${multiplayerResult.winnerScore}m`
+                            : '—'}
+                        </Text>
+                      </View>
+                      <View style={styles.scoreCardRow}>
+                        <Text style={styles.scoreCardLabel}>
+                          {multiplayerResult.loserPlayerId === localPlayerId ? 'You' : multiplayerState.opponent?.nickname ?? 'Opponent'}
+                        </Text>
+                        <Text style={styles.scoreCardValue}>
+                          {multiplayerResult.loserScore != null
+                            ? `${multiplayerResult.loserScore}m`
+                            : '—'}
+                        </Text>
+                      </View>
                       {multiplayerResult.settlementTransactionSignature ? (
                         <Text style={styles.gameOverSubtitle}>
                           Tx: {multiplayerResult.settlementTransactionSignature.slice(0, 12)}...
@@ -1216,7 +1277,7 @@ function AppContent() {
                         <Pressable
                           style={styles.restartButton}
                           onPress={() => {
-                            multiplayerController.resetLobbyState();
+                            multiplayerController.dismissResult();
                             setLocalMultiplayerDeathScore(null);
                             setScreen('lobby');
                           }}>
@@ -1285,6 +1346,27 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#a0a0a0',
     marginBottom: 8,
+  },
+  scoreCardRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    marginVertical: 2,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 8,
+  },
+  scoreCardLabel: {
+    fontSize: 16,
+    color: '#e5e7eb',
+    fontWeight: '600',
+  },
+  scoreCardValue: {
+    fontSize: 18,
+    color: '#fbbf24',
+    fontWeight: '700',
   },
   scoreText: {
     fontSize: 22,
