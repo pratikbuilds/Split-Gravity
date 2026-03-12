@@ -5,6 +5,7 @@ export const RUN_SPEED = 280;
 export const CHAR_SCALE = 1.5;
 export const CHAR_SIZE = 24;
 export const FRAME_INTERVAL_MS = 100;
+export const MULTIPLAYER_STATE_INTERVAL_MS = 33;
 /** Vertical tolerance (px) to count as on a surface; slightly generous for reliable landing. */
 export const GROUNDED_EPSILON = 6;
 export const DEATH_MARGIN_FRACTION = 1.0;

@@ -104,6 +104,30 @@ export class MultiplayerMatchController {
     this.opponentListeners.forEach((listener) => listener(snapshot));
   }
 
+  private buildInitialOpponentSnapshot(startAt: number): OpponentSnapshot | null {
+    const localPlayer = this.state.localPlayer;
+    const opponent = this.state.opponent;
+    if (!localPlayer || !opponent) return null;
+
+    const localStartsBottom = localPlayer.playerId.localeCompare(opponent.playerId) <= 0;
+    const opponentGravityDir: 1 | -1 = localStartsBottom ? -1 : 1;
+
+    return {
+      playerId: opponent.playerId,
+      nickname: opponent.nickname,
+      normalizedY: opponentGravityDir === -1 ? 0 : 1,
+      gravityDir: opponentGravityDir,
+      scroll: 0,
+      alive: true,
+      score: 0,
+      t: startAt,
+      frameIndex: 0,
+      velocityY: 0,
+      flipLocked: 0,
+      countdownLocked: 1,
+    };
+  }
+
   private setState(partial: Partial<MultiplayerViewState>) {
     this.state = { ...this.state, ...partial };
     this.emitState();
@@ -202,17 +226,41 @@ export class MultiplayerMatchController {
 
     this.socket.on('match:start', ({ startAt }) => {
       this.clearCountdownTimer();
+      const initialOpponentSnapshot = this.buildInitialOpponentSnapshot(startAt);
       this.setState({
         matchStatus: 'countdown',
         countdownStartAt: startAt,
+        opponentSnapshot: initialOpponentSnapshot,
         multiplayerResult: null,
         pendingAction: 'none',
       });
+      this.emitOpponentSnapshot(initialOpponentSnapshot);
       const delay = Math.max(0, startAt - Date.now());
       this.countdownTimer = setTimeout(() => {
         this.countdownTimer = null;
         this.setState({ matchStatus: 'running' });
       }, delay + 50);
+    });
+
+    this.socket.on('match:opponentInput', ({ playerId, inputType, t }) => {
+      const opponent = this.state.opponent;
+      const snapshot = this.state.opponentSnapshot;
+      if (!opponent || opponent.playerId !== playerId || !snapshot || !snapshot.alive) return;
+      if (inputType !== 'flip' || snapshot.countdownLocked === 1) return;
+
+      const optimisticSnapshot: OpponentSnapshot = {
+        ...snapshot,
+        gravityDir: snapshot.gravityDir === 1 ? -1 : 1,
+        velocityY: 0,
+        flipLocked: 1,
+        t: Math.max(snapshot.t, t),
+      };
+
+      this.state = {
+        ...this.state,
+        opponentSnapshot: optimisticSnapshot,
+      };
+      this.emitOpponentSnapshot(optimisticSnapshot);
     });
 
     this.socket.on('match:opponentState', ({ playerId, state }) => {
@@ -255,6 +303,7 @@ export class MultiplayerMatchController {
       };
       this.setState({
         matchStatus: 'result',
+        countdownStartAt: null,
         multiplayerResult: localizedResult,
         opponentSnapshot: null,
         reconnectSecondsRemaining: null,
@@ -353,7 +402,8 @@ export class MultiplayerMatchController {
       localPlayer,
       opponent,
       matchStatus: status,
-      countdownStartAt: status === 'countdown' ? this.state.countdownStartAt : null,
+      countdownStartAt:
+        status === 'countdown' || status === 'running' ? this.state.countdownStartAt : null,
       pendingAction: 'none',
       localReady: localPlayer ? room.readyPlayerIds.includes(localPlayer.playerId) : false,
       opponentReady: opponent ? room.readyPlayerIds.includes(opponent.playerId) : false,
@@ -363,7 +413,8 @@ export class MultiplayerMatchController {
       opponentFunded: opponent ? Boolean(room.fundedPlayerIds?.includes(opponent.playerId)) : false,
       queueStatus: room.roomKind === 'paid_queue' ? 'matched' : this.state.queueStatus,
       queueEntryId: room.roomKind === 'paid_queue' ? null : this.state.queueEntryId,
-      opponentSnapshot: status === 'running' ? this.state.opponentSnapshot : null,
+      opponentSnapshot:
+        status === 'countdown' || status === 'running' ? this.state.opponentSnapshot : null,
       reconnectSecondsRemaining: clearReconnect ? null : this.state.reconnectSecondsRemaining,
       connectionState: nextConnectionState,
       errorMessage: null,
@@ -618,7 +669,7 @@ export class MultiplayerMatchController {
       return;
     }
     const now = Date.now();
-    const minIntervalMs = 66; // ~15Hz uplink for mobile reliability
+    const minIntervalMs = 33; // ~30Hz uplink keeps opponent motion responsive without per-frame spam
     const prev = this.lastSentState;
     const smallDelta =
       prev &&

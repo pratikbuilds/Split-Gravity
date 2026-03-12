@@ -10,6 +10,7 @@ import {
   EDGE_CONTACT_MARGIN,
   FLIP_ARC_FORWARD,
   GROUNDED_EPSILON,
+  MULTIPLAYER_STATE_INTERVAL_MS,
   SUPPORT_MIN_OVERLAP,
   groundHeight,
 } from './constants';
@@ -33,6 +34,7 @@ interface UseGameGesturesArgs {
     | 'posY'
     | 'velocityY'
     | 'velocityX'
+    | 'lastMultiplayerStateAtMs'
   >;
   triggerAudioEvent: (event: 'flip') => void;
   onFlipInput?: () => void;
@@ -82,6 +84,7 @@ export const useGameGestures = ({ refs, triggerAudioEvent, onFlipInput }: UseGam
           refs.gravityDirection.value = gDir === 1 ? -1 : 1;
           refs.velocityY.value = 0;
           refs.velocityX.value = FLIP_ARC_FORWARD;
+          refs.lastMultiplayerStateAtMs.value = refs.simTimeMs.value - MULTIPLAYER_STATE_INTERVAL_MS;
         }
       }),
     [onFlipInput, refs, triggerAudioEvent]

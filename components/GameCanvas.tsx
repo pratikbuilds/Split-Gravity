@@ -11,7 +11,7 @@ import {
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { GestureDetector } from 'react-native-gesture-handler';
 import type { SharedValue } from 'react-native-reanimated';
-import { useAnimatedReaction, useSharedValue } from 'react-native-reanimated';
+import { useAnimatedReaction, useFrameCallback, useSharedValue } from 'react-native-reanimated';
 import { Atlas, Canvas, Group, Line, Picture, Rect } from '@shopify/react-native-skia';
 import { scheduleOnRN } from 'react-native-worklets';
 import { FLAT_ZONE_LENGTH, type GameAudioEvent, type OpponentSnapshot } from '../types/game';
@@ -21,12 +21,14 @@ import {
   DEATH_MARGIN_FRACTION,
   EDGE_CONTACT_MARGIN,
   ENABLE_COLLIDER_DEBUG_UI,
+  GRAVITY,
   OPPONENT_X_FACTOR,
   groundHeight,
 } from './game/constants';
 import { useGameGestures } from './game/useGameGestures';
 import { useGameSimulation } from './game/useGameSimulation';
 import { useScoreAndChunks } from './game/useScoreAndChunks';
+import { normalizeFrameStep } from '../shared/game/physics';
 
 import type { GameCanvasProps, GravityDirection, SimulationRefs } from './game/types';
 import { useWorldPictures } from './game/useWorldPictures';
@@ -35,6 +37,15 @@ import { COUNTDOWN_DIGIT_ASSETS } from './game/worldAssetSources';
 const SCORE_DISPLAY_BUCKET = 10;
 const OPPONENT_SCORE_DISPLAY_BUCKET = 10;
 const DEBUG_OVERLAY_UPDATE_MS = 80;
+const OPPONENT_AIRBORNE_VELOCITY_THRESHOLD = 10;
+
+const resolveCountdownDigit = (remainingMs: number): 3 | 2 | 1 | null => {
+  if (remainingMs > 2_000) return 3;
+  if (remainingMs > 1_000) return 2;
+  if (remainingMs > 0) return 1;
+  return null;
+};
+
 type DebugOverlayState = {
   playerX: number;
   playerY: number;
@@ -283,6 +294,7 @@ export const GameCanvas = ({
   opponentCustomSpriteUrl,
   opponentCustomSpriteAnimation,
   opponentInitialGravityDirection,
+  multiplayerCountdownStartAt,
   opponentSnapshotValue,
   opponentConnectionState = 'connected',
   opponentName,
@@ -311,6 +323,7 @@ export const GameCanvas = ({
   const simTimeMs = useSharedValue(0);
   const lastGroundedAtMs = useSharedValue(0);
   const platformRects = useSharedValue<number[]>([]);
+  const lastMultiplayerStateAtMs = useSharedValue(0);
   const opponentPosY = useSharedValue(0);
   const opponentGravity = useSharedValue(1);
   const opponentAlive = useSharedValue(0);
@@ -339,6 +352,7 @@ export const GameCanvas = ({
       simTimeMs,
       lastGroundedAtMs,
       platformRects,
+      lastMultiplayerStateAtMs,
       opponentPosY,
       opponentGravity,
       opponentAlive,
@@ -360,6 +374,7 @@ export const GameCanvas = ({
       initialized,
       countdownLocked,
       lastGroundedAtMs,
+      lastMultiplayerStateAtMs,
       opponentAlive,
       opponentCountdownLocked,
       opponentFlipLocked,
@@ -388,6 +403,13 @@ export const GameCanvas = ({
   const triggerAudioEvent = useCallback((event: GameAudioEvent) => {
     triggerAudioRef.current?.(event);
   }, []);
+  const announcedCountdownDigitRef = useRef<3 | 2 | 1 | null>(null);
+  const activeMultiplayerCountdownStartAtRef = useRef<number | null>(null);
+  if (multiplayerCountdownStartAt != null) {
+    activeMultiplayerCountdownStartAtRef.current = multiplayerCountdownStartAt;
+  }
+  const effectiveMultiplayerCountdownStartAt =
+    multiplayerCountdownStartAt ?? activeMultiplayerCountdownStartAtRef.current;
 
   const stableGroundY = height - groundHeight;
   const charSize = CHAR_SIZE * CHAR_SCALE;
@@ -472,12 +494,53 @@ export const GameCanvas = ({
     refs.initialized.value = 0;
     refs.velocityX.value = 0;
     setCountdownDigit(null);
+    announcedCountdownDigitRef.current = null;
 
     if (!worldAssetsReady) {
       return;
     }
 
+    const applyCountdownDigit = (digit: 3 | 2 | 1 | null) => {
+      setCountdownDigit((current) => (current === digit ? current : digit));
+      if (announcedCountdownDigitRef.current === digit) {
+        return;
+      }
+      announcedCountdownDigitRef.current = digit;
+      if (digit !== null) {
+        triggerAudioEvent('countdown_tick');
+      }
+    };
+
+    if (effectiveMultiplayerCountdownStartAt != null) {
+      const syncCountdown = () => {
+        const remainingMs = effectiveMultiplayerCountdownStartAt - Date.now();
+        const digit = resolveCountdownDigit(remainingMs);
+        applyCountdownDigit(digit);
+        if (remainingMs <= 0) {
+          countdownLocked.value = 0;
+          refs.initialized.value = 1;
+          return true;
+        }
+        return false;
+      };
+
+      if (syncCountdown()) {
+        return;
+      }
+
+      const timer = setInterval(() => {
+        if (syncCountdown()) {
+          clearInterval(timer);
+        }
+      }, 100);
+
+      return () => {
+        clearInterval(timer);
+      };
+    }
+
     setCountdownDigit(3);
+    announcedCountdownDigitRef.current = 3;
     triggerAudioEvent('countdown_tick');
 
     let nextDigit: 3 | 2 | 1 | null = 3;
@@ -509,6 +572,7 @@ export const GameCanvas = ({
     refs.initialized,
     refs.velocityX,
     restartKey,
+    effectiveMultiplayerCountdownStartAt,
     triggerAudioEvent,
     worldAssetsReady,
   ]);
@@ -562,6 +626,24 @@ export const GameCanvas = ({
       opponentSnapshotSignal,
     ]
   );
+
+  useFrameCallback((frameInfo) => {
+    'worklet';
+    if (opponentAlive.value !== 1) return;
+    if (opponentCountdownLocked.value === 1) return;
+
+    const airborne =
+      opponentFlipLocked.value === 1 ||
+      Math.abs(opponentVelocityY.value) > OPPONENT_AIRBORNE_VELOCITY_THRESHOLD;
+    if (!airborne) return;
+
+    const rawDt = frameInfo.timeSincePreviousFrame ?? 16;
+    const { stepCount, stepDt } = normalizeFrameStep(rawDt);
+    for (let step = 0; step < stepCount; step += 1) {
+      opponentVelocityY.value += opponentGravity.value * GRAVITY * (stepDt / 1000);
+      opponentPosY.value += opponentVelocityY.value * (stepDt / 1000);
+    }
+  });
 
   const opponentX = width * OPPONENT_X_FACTOR;
   const deathLineBottom = stableGroundY + charSize * DEATH_MARGIN_FRACTION;

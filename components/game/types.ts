@@ -29,6 +29,7 @@ export type GameCanvasProps = {
   opponentCustomSpriteUrl?: string | null;
   opponentCustomSpriteAnimation?: GeneratedSpriteAnimationDescriptor | null;
   opponentInitialGravityDirection?: GravityDirection;
+  multiplayerCountdownStartAt?: number | null;
   opponentSnapshotValue?: SharedValue<OpponentSnapshot | null>;
   opponentConnectionState?: 'connected' | 'reconnecting' | 'forfeit_pending';
   opponentName?: string;
@@ -66,6 +67,7 @@ export interface SimulationRefs {
   simTimeMs: SharedValue<number>;
   lastGroundedAtMs: SharedValue<number>;
   platformRects: SharedValue<number[]>;
+  lastMultiplayerStateAtMs: SharedValue<number>;
   opponentPosY: SharedValue<number>;
   opponentGravity: SharedValue<number>;
   opponentAlive: SharedValue<number>;

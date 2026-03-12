@@ -4,7 +4,14 @@ import { useAnimatedReaction, useSharedValue } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 import type { Chunk, Platform } from '../../types/game';
 import { generateLevelChunks, preGenerateLevelChunks } from '../../utils/levelGeneratorSections';
-import { CHAR_SCALE, CHAR_SIZE, PLAYER_X_FACTOR, groundHeight, tileSize } from './constants';
+import {
+  CHAR_SCALE,
+  CHAR_SIZE,
+  MULTIPLAYER_STATE_INTERVAL_MS,
+  PLAYER_X_FACTOR,
+  groundHeight,
+  tileSize,
+} from './constants';
 import type { GravityDirection, SimulationRefs } from './types';
 
 interface UseScoreAndChunksArgs {
@@ -33,6 +40,7 @@ interface UseScoreAndChunksArgs {
     | 'flipLockedUntilLanding'
     | 'platformRects'
     | 'lastGroundedAtMs'
+    | 'lastMultiplayerStateAtMs'
   >;
 }
 
@@ -79,6 +87,7 @@ export const useScoreAndChunks = ({
     refs.lastGroundedAtMs.value = 0;
     refs.elapsedMs.value = 0;
     refs.frameIndex.value = 0;
+    refs.lastMultiplayerStateAtMs.value = -MULTIPLAYER_STATE_INTERVAL_MS;
     refs.charX.value = width * PLAYER_X_FACTOR;
     refs.initialized.value = 1;
     lastSpawnRef.current = 0;

@@ -188,6 +188,7 @@ function AppContent() {
   const [paidRunSubmissionError, setPaidRunSubmissionError] = useState<string | null>(null);
 
   const multiplayerControllerRef = useRef<MultiplayerMatchController | null>(null);
+  const activeMultiplayerStartAtRef = useRef<number | null>(null);
   if (!multiplayerControllerRef.current) {
     multiplayerControllerRef.current = new MultiplayerMatchController();
   }
@@ -530,7 +531,6 @@ function AppContent() {
     selectedCustomCharacter?.asset.sheetUrl,
     multiplayerState.opponent?.characterId,
     opponentCustomCharacter?.asset.sheetUrl,
-    preloadSkiaImages,
   ]);
 
   useEffect(() => {
@@ -550,8 +550,14 @@ function AppContent() {
 
   useEffect(() => {
     if (!mode.startsWith('multi_')) return;
-    if (multiplayerState.matchStatus !== 'running') return;
+    if (multiplayerState.matchStatus !== 'countdown' && multiplayerState.matchStatus !== 'running') {
+      return;
+    }
     if (!hasMultiplayerPair) return;
+    if (multiplayerState.countdownStartAt == null) return;
+    if (activeMultiplayerStartAtRef.current === multiplayerState.countdownStartAt) return;
+
+    activeMultiplayerStartAtRef.current = multiplayerState.countdownStartAt;
 
     setBackgroundIndex((previousIndex) => getRandomBackgroundIndex(previousIndex));
     setTerrainTheme((previousTheme) => getRandomTerrainTheme(previousTheme));
@@ -590,17 +596,22 @@ function AppContent() {
   }, [
     hasMultiplayerPair,
     mode,
+    multiplayerState.countdownStartAt,
     multiplayerState.matchStatus,
     multiplayerState.opponent?.characterId,
     multiplayerState.roomCode,
     ensureAudioReady,
     preloadGameEnvironment,
     preloadCharacters,
-    preloadSkiaImages,
     selectedCharacterId,
     selectedCustomCharacter?.asset.sheetUrl,
     opponentCustomCharacter?.asset.sheetUrl,
   ]);
+
+  useEffect(() => {
+    if (multiplayerState.countdownStartAt != null) return;
+    activeMultiplayerStartAtRef.current = null;
+  }, [multiplayerState.countdownStartAt]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -1176,6 +1187,9 @@ function AppContent() {
                 mode.startsWith('multi_') ? opponentCustomCharacter?.asset.animation : undefined
               }
               opponentInitialGravityDirection={opponentInitialGravityDirection}
+              multiplayerCountdownStartAt={
+                mode.startsWith('multi_') ? multiplayerState.countdownStartAt : undefined
+              }
               opponentSnapshotValue={mode.startsWith('multi_') ? opponentSnapshotValue : undefined}
               opponentName={
                 mode.startsWith('multi_') ? multiplayerState.opponent?.nickname : undefined

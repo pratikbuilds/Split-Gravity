@@ -37,7 +37,7 @@ const RECONNECT_GRACE_MS = 10_000;
 const ROOM_TTL_MS = 2 * 60 * 1000;
 /** Time before an ended match room is cleaned up if no rematch */
 const REMATCH_LOBBY_TTL_MS = 2 * 60 * 1000;
-const START_COUNTDOWN_MS = 2_000;
+const START_COUNTDOWN_MS = 3_000;
 const MAX_DELTA_SCROLL_PER_MS = 0.5;
 const LOG_STATE_EVENTS = env.LOG_STATE_EVENTS;
 
@@ -407,9 +407,19 @@ export const startServer = async () => {
     }
 
     room.state = 'COUNTDOWN';
+    room.startedAt = Date.now() + START_COUNTDOWN_MS;
+    io.to(room.roomCode).emit('match:start', {
+      roomCode: room.roomCode,
+      seed: room.seed,
+      startAt: room.startedAt,
+      config: {
+        reconnectGraceMs: RECONNECT_GRACE_MS,
+      },
+    });
     logAt('info', 'match.countdown.started', {
       roomCode: room.roomCode,
       countdownMs: START_COUNTDOWN_MS,
+      startAt: room.startedAt,
     });
     emitRoomState(room);
 
@@ -426,6 +436,7 @@ export const startServer = async () => {
       if (!allConnected) {
         pruneDisconnectedReadyPlayers(room.readyPlayerIds, room.players.values());
         room.state = derivePreMatchState(room.players.size, room.readyPlayerIds.size);
+        room.startedAt = undefined;
         logAt('warn', 'match.countdown.cancelled', {
           roomCode: room.roomCode,
           reason: 'players_disconnected',
@@ -437,15 +448,6 @@ export const startServer = async () => {
       }
 
       room.state = 'RUNNING';
-      room.startedAt = Date.now() + 400;
-      io.to(room.roomCode).emit('match:start', {
-        roomCode: room.roomCode,
-        seed: room.seed,
-        startAt: room.startedAt,
-        config: {
-          reconnectGraceMs: RECONNECT_GRACE_MS,
-        },
-      });
       logAt('info', 'match.started', {
         roomCode: room.roomCode,
         startAt: room.startedAt,
@@ -1315,9 +1317,17 @@ export const startServer = async () => {
       startMatchIfReady(room);
     });
 
-    socket.on('match:input', ({ t }) => {
+    socket.on('match:input', ({ t, inputType }) => {
       const linked = findRoomBySocket(socket.id);
       if (!linked || linked.room.state !== 'RUNNING') return;
+      if (inputType !== 'flip') {
+        logAt('warn', 'match.input.rejected_invalid_type', {
+          roomCode: linked.room.roomCode,
+          playerId: linked.player.playerId,
+          inputType,
+        });
+        return;
+      }
       if (linked.player.lastInputAt && t < linked.player.lastInputAt) {
         logAt('debug', 'match.input.rejected_non_monotonic', {
           roomCode: linked.room.roomCode,
@@ -1329,6 +1339,15 @@ export const startServer = async () => {
       }
       linked.player.lastInputAt = t;
       linked.player.lastSeenAt = Date.now();
+
+      const opponent = getRoomOpponent(linked.room, linked.player.playerId);
+      if (!opponent) return;
+
+      io.to(opponent.socketId).emit('match:opponentInput', {
+        playerId: linked.player.playerId,
+        t,
+        inputType,
+      });
     });
 
     socket.on('match:state', (payload: MatchStatePacket) => {

@@ -16,6 +16,7 @@ import {
   GRAVITY,
   GROUNDED_EPSILON,
   LANDING_MIN_OVERLAP,
+  MULTIPLAYER_STATE_INTERVAL_MS,
   RUN_SPEED,
   SUPPORT_MIN_OVERLAP,
   EDGE_CONTACT_MARGIN,
@@ -115,6 +116,7 @@ interface UseGameSimulationArgs {
     | 'simTimeMs'
     | 'lastGroundedAtMs'
     | 'platformRects'
+    | 'lastMultiplayerStateAtMs'
   >;
   triggerAudioEvent: (event: 'game_over') => void;
   triggerGameOver: (score: number) => void;
@@ -324,7 +326,11 @@ export const useGameSimulation = ({
       refs.frameIndex.value = (refs.frameIndex.value + 1) % 360;
     }
 
-    if (onLocalState && refs.frameIndex.value % 2 === 0) {
+    if (
+      onLocalState &&
+      refs.simTimeMs.value - refs.lastMultiplayerStateAtMs.value >= MULTIPLAYER_STATE_INTERVAL_MS
+    ) {
+      refs.lastMultiplayerStateAtMs.value = refs.simTimeMs.value;
       const laneSpan = Math.max(1, height - 2 * groundHeight - charH);
       const normalizedY = (refs.posY.value - groundHeight) / laneSpan;
       scheduleOnRN(onLocalState, {

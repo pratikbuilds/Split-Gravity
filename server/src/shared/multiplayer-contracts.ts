@@ -94,6 +94,12 @@ export interface MatchInputPayload {
   inputType: 'flip';
 }
 
+export interface OpponentInputPayload {
+  playerId: string;
+  t: number;
+  inputType: 'flip';
+}
+
 export interface MatchDeathPayload {
   t: number;
   score: number;
@@ -162,6 +168,7 @@ export interface ServerToClientEvents {
     startAt: number;
     config: MatchConfig;
   }) => void;
+  'match:opponentInput': (payload: OpponentInputPayload) => void;
   'match:opponentState': (payload: { playerId: string; state: MatchStatePacket }) => void;
   'match:result': (payload: MatchResult) => void;
   'session:reconnectWindow': (payload: ReconnectWindowPayload) => void;
