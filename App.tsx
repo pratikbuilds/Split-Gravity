@@ -439,6 +439,43 @@ function AppContent() {
     preloadCharacters,
   ]);
 
+  // Preload game assets as soon as both players are in lobby so they're ready when countdown starts
+  useEffect(() => {
+    if (!mode.startsWith('multi_')) return;
+    if (!hasMultiplayerPair) return;
+    if (multiplayerState.matchStatus !== 'lobby') return;
+
+    const customSheetUrls: string[] = [];
+    if (selectedCharacterId === 'custom' && selectedCustomCharacter?.asset.sheetUrl) {
+      customSheetUrls.push(selectedCustomCharacter.asset.sheetUrl);
+    }
+    if (
+      multiplayerState.opponent?.characterId === 'custom' &&
+      opponentCustomCharacter?.asset.sheetUrl
+    ) {
+      customSheetUrls.push(opponentCustomCharacter.asset.sheetUrl);
+    }
+
+    void (async () => {
+      await preloadGameEnvironment();
+      await preloadCharacters([selectedCharacterId, multiplayerState.opponent?.characterId]);
+      if (customSheetUrls.length > 0) {
+        await preloadSkiaImages(customSheetUrls);
+      }
+    })();
+  }, [
+    mode,
+    hasMultiplayerPair,
+    multiplayerState.matchStatus,
+    multiplayerState.opponent?.characterId,
+    selectedCharacterId,
+    selectedCustomCharacter?.asset.sheetUrl,
+    opponentCustomCharacter?.asset.sheetUrl,
+    preloadGameEnvironment,
+    preloadCharacters,
+    preloadSkiaImages,
+  ]);
+
   useEffect(() => {
     let active = true;
     if (selectedCharacterId !== 'custom' || !selectedCustomCharacter?.activeVersionId) return;
@@ -571,6 +608,9 @@ function AppContent() {
     );
     setGameKey((k) => k + 1);
 
+    // Show game screen immediately so both characters and countdown are visible
+    setScreen('game');
+
     const customSheetUrls: string[] = [];
     if (selectedCharacterId === 'custom' && selectedCustomCharacter?.asset.sheetUrl) {
       customSheetUrls.push(selectedCustomCharacter.asset.sheetUrl);
@@ -582,17 +622,14 @@ function AppContent() {
       customSheetUrls.push(opponentCustomCharacter.asset.sheetUrl);
     }
 
-    const run = async () => {
+    void (async () => {
       await preloadGameEnvironment();
       await preloadCharacters([selectedCharacterId, multiplayerState.opponent?.characterId]);
       if (customSheetUrls.length > 0) {
         await preloadSkiaImages(customSheetUrls);
       }
       await ensureAudioReady();
-      if (!mountedRef.current) return;
-      setScreen('game');
-    };
-    void run();
+    })();
   }, [
     hasMultiplayerPair,
     mode,

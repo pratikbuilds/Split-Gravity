@@ -37,7 +37,7 @@ const RECONNECT_GRACE_MS = 10_000;
 const ROOM_TTL_MS = 2 * 60 * 1000;
 /** Time before an ended match room is cleaned up if no rematch */
 const REMATCH_LOBBY_TTL_MS = 2 * 60 * 1000;
-const START_COUNTDOWN_MS = 3_000;
+const START_COUNTDOWN_MS = 5_000;
 const MAX_DELTA_SCROLL_PER_MS = 0.5;
 const LOG_STATE_EVENTS = env.LOG_STATE_EVENTS;
 

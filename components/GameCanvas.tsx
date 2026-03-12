@@ -39,7 +39,9 @@ const OPPONENT_SCORE_DISPLAY_BUCKET = 10;
 const DEBUG_OVERLAY_UPDATE_MS = 80;
 const OPPONENT_AIRBORNE_VELOCITY_THRESHOLD = 10;
 
-const resolveCountdownDigit = (remainingMs: number): 3 | 2 | 1 | null => {
+const resolveCountdownDigit = (remainingMs: number): 5 | 4 | 3 | 2 | 1 | null => {
+  if (remainingMs > 4_000) return 5;
+  if (remainingMs > 3_000) return 4;
   if (remainingMs > 2_000) return 3;
   if (remainingMs > 1_000) return 2;
   if (remainingMs > 0) return 1;
@@ -302,7 +304,7 @@ export const GameCanvas = ({
   onLocalState,
   onLocalDeath,
 }: GameCanvasProps) => {
-  const [countdownDigit, setCountdownDigit] = useState<3 | 2 | 1 | null>(null);
+  const [countdownDigit, setCountdownDigit] = useState<5 | 4 | 3 | 2 | 1 | null>(null);
   const { width, height } = useWindowDimensions();
 
   const groundY = useSharedValue(0);
@@ -403,7 +405,7 @@ export const GameCanvas = ({
   const triggerAudioEvent = useCallback((event: GameAudioEvent) => {
     triggerAudioRef.current?.(event);
   }, []);
-  const announcedCountdownDigitRef = useRef<3 | 2 | 1 | null>(null);
+  const announcedCountdownDigitRef = useRef<5 | 4 | 3 | 2 | 1 | null>(null);
   const activeMultiplayerCountdownStartAtRef = useRef<number | null>(null);
   if (multiplayerCountdownStartAt != null) {
     activeMultiplayerCountdownStartAtRef.current = multiplayerCountdownStartAt;
@@ -496,11 +498,7 @@ export const GameCanvas = ({
     setCountdownDigit(null);
     announcedCountdownDigitRef.current = null;
 
-    if (!worldAssetsReady) {
-      return;
-    }
-
-    const applyCountdownDigit = (digit: 3 | 2 | 1 | null) => {
+    const applyCountdownDigit = (digit: 5 | 4 | 3 | 2 | 1 | null) => {
       setCountdownDigit((current) => (current === digit ? current : digit));
       if (announcedCountdownDigitRef.current === digit) {
         return;
@@ -511,14 +509,20 @@ export const GameCanvas = ({
       }
     };
 
+    const tryUnlock = () => {
+      if (worldAssetsReady) {
+        countdownLocked.value = 0;
+        refs.initialized.value = 1;
+      }
+    };
+
     if (effectiveMultiplayerCountdownStartAt != null) {
       const syncCountdown = () => {
         const remainingMs = effectiveMultiplayerCountdownStartAt - Date.now();
         const digit = resolveCountdownDigit(remainingMs);
         applyCountdownDigit(digit);
         if (remainingMs <= 0) {
-          countdownLocked.value = 0;
-          refs.initialized.value = 1;
+          tryUnlock();
           return true;
         }
         return false;
@@ -539,12 +543,24 @@ export const GameCanvas = ({
       };
     }
 
-    setCountdownDigit(3);
-    announcedCountdownDigitRef.current = 3;
+    setCountdownDigit(5);
+    announcedCountdownDigitRef.current = 5;
     triggerAudioEvent('countdown_tick');
 
-    let nextDigit: 3 | 2 | 1 | null = 3;
+    let nextDigit: 5 | 4 | 3 | 2 | 1 | null = 5;
     const timer = setInterval(() => {
+      if (nextDigit === 5) {
+        nextDigit = 4;
+        setCountdownDigit(4);
+        triggerAudioEvent('countdown_tick');
+        return;
+      }
+      if (nextDigit === 4) {
+        nextDigit = 3;
+        setCountdownDigit(3);
+        triggerAudioEvent('countdown_tick');
+        return;
+      }
       if (nextDigit === 3) {
         nextDigit = 2;
         setCountdownDigit(2);
@@ -560,8 +576,7 @@ export const GameCanvas = ({
       clearInterval(timer);
       nextDigit = null;
       setCountdownDigit(null);
-      countdownLocked.value = 0;
-      refs.initialized.value = 1;
+      tryUnlock();
     }, 1000);
 
     return () => {
@@ -574,21 +589,27 @@ export const GameCanvas = ({
     restartKey,
     effectiveMultiplayerCountdownStartAt,
     triggerAudioEvent,
-    worldAssetsReady,
   ]);
 
+  // Unlock when assets become ready after countdown has finished
+  useEffect(() => {
+    if (!worldAssetsReady) return;
+    if (countdownDigit !== null) return;
+    if (effectiveMultiplayerCountdownStartAt != null) {
+      if (effectiveMultiplayerCountdownStartAt - Date.now() > 0) return;
+    }
+    countdownLocked.value = 0;
+    refs.initialized.value = 1;
+  }, [worldAssetsReady, countdownDigit, effectiveMultiplayerCountdownStartAt, countdownLocked, refs.initialized]);
+
   const countdownImageSource = useMemo(() => {
-    if (countdownDigit === 1) {
-      return COUNTDOWN_DIGIT_ASSETS[1];
-    }
-    if (countdownDigit === 2) {
-      return COUNTDOWN_DIGIT_ASSETS[2];
-    }
-    if (countdownDigit === 3) {
-      return COUNTDOWN_DIGIT_ASSETS[3];
-    }
+    if (countdownDigit === 1) return COUNTDOWN_DIGIT_ASSETS[1];
+    if (countdownDigit === 2) return COUNTDOWN_DIGIT_ASSETS[2];
+    if (countdownDigit === 3) return COUNTDOWN_DIGIT_ASSETS[3];
     return null;
   }, [countdownDigit]);
+
+  const countdownUsesText = countdownDigit === 5 || countdownDigit === 4;
 
   const fallbackOpponentSnapshotValue = useSharedValue<OpponentSnapshot | null>(null);
   const opponentSnapshotSignal = opponentSnapshotValue ?? fallbackOpponentSnapshotValue;
@@ -722,10 +743,18 @@ export const GameCanvas = ({
         </View>
       )}
 
-      {countdownImageSource && (
+      {(countdownImageSource || countdownUsesText) && (
         <View pointerEvents="none" style={styles.countdownOverlay}>
           <Text style={styles.countdownLabel}>Game starts in</Text>
-          <Image source={countdownImageSource} style={styles.countdownDigit} resizeMode="contain" />
+          {countdownUsesText ? (
+            <Text style={styles.countdownDigitText}>{countdownDigit}</Text>
+          ) : (
+            <Image
+              source={countdownImageSource!}
+              style={styles.countdownDigit}
+              resizeMode="contain"
+            />
+          )}
         </View>
       )}
 
@@ -869,5 +898,13 @@ const styles = StyleSheet.create({
   countdownDigit: {
     width: 88,
     height: 88,
+  },
+  countdownDigitText: {
+    fontSize: 96,
+    fontWeight: '800',
+    color: '#ffffff',
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 6,
   },
 });

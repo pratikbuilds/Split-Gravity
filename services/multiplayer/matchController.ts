@@ -239,7 +239,7 @@ export class MultiplayerMatchController {
       this.countdownTimer = setTimeout(() => {
         this.countdownTimer = null;
         this.setState({ matchStatus: 'running' });
-      }, delay + 50);
+      }, delay);
     });
 
     this.socket.on('match:opponentInput', ({ playerId, inputType, t }) => {
@@ -669,12 +669,12 @@ export class MultiplayerMatchController {
       return;
     }
     const now = Date.now();
-    const minIntervalMs = 33; // ~30Hz uplink keeps opponent motion responsive without per-frame spam
+    const minIntervalMs = 16; // ~60Hz uplink for responsive opponent sync during jumps/landing
     const prev = this.lastSentState;
     const smallDelta =
       prev &&
-      Math.abs(prev.normalizedY - payload.normalizedY) < 0.004 &&
-      Math.abs(prev.scroll - payload.scroll) < 1.25 &&
+      Math.abs(prev.normalizedY - payload.normalizedY) < 0.002 &&
+      Math.abs(prev.scroll - payload.scroll) < 0.5 &&
       prev.gravityDir === payload.gravityDir &&
       prev.alive === payload.alive;
     if (now - this.lastStateSentAt < minIntervalMs && smallDelta) {
