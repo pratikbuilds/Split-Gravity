@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Skia, createPicture, rect, useImage, useRSXformBuffer } from '@shopify/react-native-skia';
+import { Skia, createPicture, rect } from '@shopify/react-native-skia';
 import { useDerivedValue } from 'react-native-reanimated';
 import type { GeneratedSpriteAnimationDescriptor } from '../../shared/character-generation-contracts';
 import type { Platform, TerrainTheme } from '../../types/game';
@@ -32,6 +32,11 @@ import { MIDDLE_PLATFORM_ASSETS, TERRAIN_TILE_ASSETS } from './worldAssetSources
 type SrcClipAnchor = 'start' | 'end';
 const AIRBORNE_VEL_THRESHOLD = 10;
 const JUMP_SCALE_BOOST = 1.3;
+const OFFSCREEN_RS_XFORM = { scale: 1, x: -10_000, y: -10_000 } as const;
+const isFiniteNumber = (value: number) => {
+  'worklet';
+  return Number.isFinite(value);
+};
 
 const resolveAnimatedFrame = (
   frames: readonly SpriteFrame[],
@@ -179,7 +184,7 @@ export const useWorldPictures = ({
   const backgroundSource = GAME_BACKGROUNDS[safeBackgroundIndex];
   const terrainAssets = TERRAIN_TILE_ASSETS[terrainTheme];
 
-  const backgroundImage = useImage(backgroundSource);
+  const backgroundImage = useSkiaImageAsset(backgroundSource);
   const backgroundTileWidth = useMemo(() => {
     if (!backgroundImage || height <= 0) return 0;
     const sourceHeight = backgroundImage.height();
@@ -187,15 +192,15 @@ export const useWorldPictures = ({
     const fitScale = height / sourceHeight;
     return backgroundImage.width() * fitScale;
   }, [backgroundImage, height]);
-  const terrainTopImage = useImage(terrainAssets.top);
-  const terrainTopLeftImage = useImage(terrainAssets.topLeft);
-  const terrainTopRightImage = useImage(terrainAssets.topRight);
-  const terrainLeftImage = useImage(terrainAssets.left);
-  const terrainCenterImage = useImage(terrainAssets.center);
-  const terrainRightImage = useImage(terrainAssets.right);
-  const middlePlatformLeftImage = useImage(MIDDLE_PLATFORM_ASSETS.left);
-  const middlePlatformCenterImage = useImage(MIDDLE_PLATFORM_ASSETS.center);
-  const middlePlatformRightImage = useImage(MIDDLE_PLATFORM_ASSETS.right);
+  const terrainTopImage = useSkiaImageAsset(terrainAssets.top);
+  const terrainTopLeftImage = useSkiaImageAsset(terrainAssets.topLeft);
+  const terrainTopRightImage = useSkiaImageAsset(terrainAssets.topRight);
+  const terrainLeftImage = useSkiaImageAsset(terrainAssets.left);
+  const terrainCenterImage = useSkiaImageAsset(terrainAssets.center);
+  const terrainRightImage = useSkiaImageAsset(terrainAssets.right);
+  const middlePlatformLeftImage = useSkiaImageAsset(MIDDLE_PLATFORM_ASSETS.left);
+  const middlePlatformCenterImage = useSkiaImageAsset(MIDDLE_PLATFORM_ASSETS.center);
+  const middlePlatformRightImage = useSkiaImageAsset(MIDDLE_PLATFORM_ASSETS.right);
   const fallbackCharacterPreset = getCharacterPresetOrDefault(characterId);
   const hasOpponentCharacter = opponentCharacterId != null;
   const fallbackOpponentPreset = getCharacterPresetOrDefault(opponentCharacterId);
@@ -236,7 +241,7 @@ export const useWorldPictures = ({
     opponentImage,
   ]);
 
-  const characterTransforms = useRSXformBuffer(1, (val) => {
+  const characterTransforms = useDerivedValue(() => {
     'worklet';
     const frame = resolveCharacterFrame(
       characterPreset,
@@ -248,12 +253,7 @@ export const useWorldPictures = ({
     const airborne = isAirborne(refs.flipLockedUntilLanding.value, refs.velocityY.value);
     const hitboxSize = CHAR_SIZE * CHAR_SCALE;
     const scaleBoost = airborne ? JUMP_SCALE_BOOST : 1;
-    const { scale, feetTrim } = resolveRenderMetrics(
-      characterPreset,
-      frame,
-      hitboxSize,
-      scaleBoost
-    );
+    const { scale, feetTrim } = resolveRenderMetrics(characterPreset, frame, hitboxSize, scaleBoost);
     const gDir = refs.gravityDirection.value;
     const { x, y } = resolveSpriteBasePosition({
       frame,
@@ -263,14 +263,16 @@ export const useWorldPictures = ({
       worldAnchorY:
         gDir === -1 ? refs.posY.value - feetTrim : refs.posY.value + hitboxSize + feetTrim,
     });
-    val.set(scale, 0, x, y);
+    if (!isFiniteNumber(scale) || !isFiniteNumber(x) || !isFiniteNumber(y)) {
+      return [Skia.RSXform(OFFSCREEN_RS_XFORM.scale, 0, OFFSCREEN_RS_XFORM.x, OFFSCREEN_RS_XFORM.y)];
+    }
+    return [Skia.RSXform(scale, 0, x, y)];
   });
 
-  const opponentTransforms = useRSXformBuffer(1, (val) => {
+  const opponentTransforms = useDerivedValue(() => {
     'worklet';
     if (refs.opponentAlive.value !== 1) {
-      val.set(1, 0, -10_000, -10_000);
-      return;
+      return [Skia.RSXform(OFFSCREEN_RS_XFORM.scale, 0, OFFSCREEN_RS_XFORM.x, OFFSCREEN_RS_XFORM.y)];
     }
     const frame = resolveCharacterFrameForPoseCode(
       opponentPreset,
@@ -290,7 +292,10 @@ export const useWorldPictures = ({
           ? refs.opponentPosY.value - feetTrim
           : refs.opponentPosY.value + hitboxSize + feetTrim,
     });
-    val.set(scale, 0, x, y);
+    if (!isFiniteNumber(scale) || !isFiniteNumber(x) || !isFiniteNumber(y)) {
+      return [Skia.RSXform(OFFSCREEN_RS_XFORM.scale, 0, OFFSCREEN_RS_XFORM.x, OFFSCREEN_RS_XFORM.y)];
+    }
+    return [Skia.RSXform(scale, 0, x, y)];
   });
 
   const opponentRenderTransform = useDerivedValue(() => {

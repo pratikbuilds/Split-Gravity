@@ -4,11 +4,22 @@ import { OPPONENT_X_FACTOR, groundHeight } from './constants';
 import { resolvePoseCode } from './multiplayerPose';
 import type { SimulationRefs } from './types';
 import type { OpponentSnapshot } from '../../types/game';
-import opponentPlayback from '../../shared/opponentPlayback';
-import type { TimedOpponentSnapshot } from '../../shared/opponentPlayback';
 
-const OPPONENT_INTERPOLATION_DELAY_MS = 75;
+const OPPONENT_INTERPOLATION_DELAY_MS = 40;
 const OPPONENT_MAX_EXTRAPOLATION_MS = 100;
+
+const isFiniteNumber = (value: number) => {
+  'worklet';
+  return Number.isFinite(value);
+};
+const clamp = (value: number, min: number, max: number) => {
+  'worklet';
+  return Math.min(max, Math.max(min, value));
+};
+const lerp = (from: number, to: number, alpha: number) => {
+  'worklet';
+  return from + (to - from) * alpha;
+};
 
 type UseOpponentPlaybackArgs = {
   width: number;
@@ -38,11 +49,10 @@ export const useOpponentPlayback = ({
   refs,
   opponentSnapshotSignal,
 }: UseOpponentPlaybackArgs) => {
-  // The app package is transpiled as CJS for the shared root, so the server/app boundary
-  // exposes these helpers through the default export in some toolchains.
-  // eslint-disable-next-line import/no-named-as-default-member
-  const { enqueueOpponentSnapshot, sampleOpponentSnapshot } = opponentPlayback;
-  const playbackQueue = useSharedValue<TimedOpponentSnapshot[]>([]);
+  const previousSnapshot = useSharedValue<OpponentSnapshot | null>(null);
+  const currentSnapshot = useSharedValue<OpponentSnapshot | null>(null);
+  const previousReceivedAt = useSharedValue(0);
+  const currentReceivedAt = useSharedValue(0);
 
   useAnimatedReaction(
     () => {
@@ -52,44 +62,122 @@ export const useOpponentPlayback = ({
     (snapshot) => {
       'worklet';
       if (!snapshot) {
-        playbackQueue.value = [];
+        previousSnapshot.value = null;
+        currentSnapshot.value = null;
+        previousReceivedAt.value = 0;
+        currentReceivedAt.value = 0;
         refs.opponentAlive.value = 0;
         refs.opponentCountdownLocked.value = 1;
         return;
       }
 
-      playbackQueue.value = enqueueOpponentSnapshot(playbackQueue.value, snapshot, Date.now());
+      const now = Date.now();
+      const current = currentSnapshot.value;
+
+      if (snapshot.phase !== 'running' || snapshot.countdownLocked === 1) {
+        previousSnapshot.value = null;
+        currentSnapshot.value = snapshot;
+        previousReceivedAt.value = 0;
+        currentReceivedAt.value = now;
+        return;
+      }
+
+      if (current) {
+        if (current.playerId !== snapshot.playerId) {
+          previousSnapshot.value = null;
+          currentSnapshot.value = snapshot;
+          previousReceivedAt.value = 0;
+          currentReceivedAt.value = now;
+          return;
+        }
+
+        if (current.phase !== 'running' || current.countdownLocked === 1) {
+          previousSnapshot.value = null;
+          currentSnapshot.value = snapshot;
+          previousReceivedAt.value = 0;
+          currentReceivedAt.value = now;
+          return;
+        }
+
+        if (snapshot.seq <= current.seq) {
+          return;
+        }
+
+        previousSnapshot.value = current;
+        previousReceivedAt.value = currentReceivedAt.value;
+      } else {
+        previousSnapshot.value = null;
+        previousReceivedAt.value = 0;
+      }
+
+      currentSnapshot.value = snapshot;
+      currentReceivedAt.value = now;
     },
-    [opponentSnapshotSignal, playbackQueue, refs]
+    [currentReceivedAt, currentSnapshot, previousReceivedAt, previousSnapshot, refs]
   );
 
   useFrameCallback(() => {
     'worklet';
-    const queue = playbackQueue.value;
-    if (queue.length === 0) return;
+    const current = currentSnapshot.value;
+    if (!current) return;
 
+    const prev = previousSnapshot.value;
+    const currentAt = currentReceivedAt.value;
+    const prevAt = previousReceivedAt.value;
     const renderAt = Date.now() - OPPONENT_INTERPOLATION_DELAY_MS;
-    const sampled = sampleOpponentSnapshot(queue, renderAt, OPPONENT_MAX_EXTRAPOLATION_MS);
-    if (!sampled) return;
+
+    let sampledWorldX = current.worldX;
+    let sampledNormalizedY = current.normalizedY;
+    let sampledVelocityX = current.velocityX;
+    let sampledVelocityY = current.velocityY;
+
+    if (prev && prev.playerId === current.playerId && prev.seq < current.seq && prevAt > 0) {
+      if (renderAt <= currentAt) {
+        const spanMs = Math.max(1, currentAt - prevAt);
+        const alpha = clamp((renderAt - prevAt) / spanMs, 0, 1);
+        sampledWorldX = lerp(prev.worldX, current.worldX, alpha);
+        sampledNormalizedY = lerp(prev.normalizedY, current.normalizedY, alpha);
+        sampledVelocityX = lerp(prev.velocityX, current.velocityX, alpha);
+        sampledVelocityY = lerp(prev.velocityY, current.velocityY, alpha);
+      } else {
+        const extrapolationMs = Math.min(renderAt - currentAt, OPPONENT_MAX_EXTRAPOLATION_MS);
+        if (extrapolationMs > 0) {
+          const spanMs = Math.max(1, currentAt - prevAt);
+          const worldVelocityPerMs = (current.worldX - prev.worldX) / spanMs;
+          const normalizedVelocityPerMs = (current.normalizedY - prev.normalizedY) / spanMs;
+          sampledWorldX = current.worldX + worldVelocityPerMs * extrapolationMs;
+          sampledNormalizedY = current.normalizedY + normalizedVelocityPerMs * extrapolationMs;
+        }
+      }
+    }
 
     const laneSpan = Math.max(1, height - 2 * groundHeight - charSize);
-    const targetY = groundHeight + sampled.normalizedY * laneSpan;
+    const normalizedY = clamp(
+      isFiniteNumber(sampledNormalizedY) ? sampledNormalizedY : 0,
+      0,
+      1
+    );
+    const worldX = isFiniteNumber(sampledWorldX) ? sampledWorldX : refs.totalScroll.value;
+    const velocityX = isFiniteNumber(sampledVelocityX) ? sampledVelocityX : 0;
+    const velocityY = isFiniteNumber(sampledVelocityY) ? sampledVelocityY : 0;
+    const targetY = groundHeight + normalizedY * laneSpan;
+    const screenX = worldX - refs.totalScroll.value;
 
-    refs.opponentGravity.value = sampled.gravityDir;
-    refs.opponentFrameIndex.value = sampled.frameIndex;
-    refs.opponentFlipLocked.value = sampled.flipLocked;
+    refs.opponentGravity.value = current.gravityDir;
+    refs.opponentFrameIndex.value = current.frameIndex;
+    refs.opponentFlipLocked.value = current.flipLocked;
     refs.opponentCountdownLocked.value =
-      sampled.phase === 'running' ? sampled.countdownLocked : 1;
-    refs.opponentVelocityX.value = sampled.velocityX;
-    refs.opponentVelocityY.value = sampled.velocityY;
-    refs.opponentPoseCode.value = resolvePoseCode(sampled.pose);
-    refs.opponentPosY.value = targetY;
+      current.phase === 'running' ? current.countdownLocked : 1;
+    refs.opponentVelocityX.value = velocityX;
+    refs.opponentVelocityY.value = velocityY;
+    refs.opponentPoseCode.value = resolvePoseCode(current.pose);
+    refs.opponentPosY.value = isFiniteNumber(targetY) ? targetY : groundHeight;
     refs.opponentPosX.value =
-      sampled.phase === 'running' && sampled.countdownLocked === 0
-        ? sampled.worldX - refs.totalScroll.value
-        : sampled.worldX > 0
-          ? sampled.worldX - refs.totalScroll.value
+      current.phase === 'running' && current.countdownLocked === 0
+        ? (isFiniteNumber(screenX) ? screenX : width * OPPONENT_X_FACTOR)
+        : worldX > 0
+          ? (isFiniteNumber(screenX) ? screenX : width * OPPONENT_X_FACTOR)
           : width * OPPONENT_X_FACTOR;
-    refs.opponentAlive.value = 1;
+    refs.opponentAlive.value = current.alive ? 1 : 0;
   });
 };

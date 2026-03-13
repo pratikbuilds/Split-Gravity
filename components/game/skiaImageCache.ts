@@ -1,11 +1,44 @@
 import { useEffect, useState } from 'react';
 import { Asset } from 'expo-asset';
+import { File, Directory, Paths } from 'expo-file-system';
 import { Skia, type SkImage } from '@shopify/react-native-skia';
 
 type SkiaImageSource = number | string;
+const REMOTE_IMAGE_CACHE_DIR = new Directory(Paths.cache, 'skia-image-cache');
 
 const getSourceCacheKey = (source: SkiaImageSource) =>
   typeof source === 'number' ? `module:${source}` : `uri:${source}`;
+
+const getRemoteImageExtension = (uri: string) => {
+  const pathname = uri.split('?')[0] ?? uri;
+  const lastDot = pathname.lastIndexOf('.');
+  if (lastDot === -1) return '.img';
+  const extension = pathname.slice(lastDot);
+  return extension.length > 10 ? '.img' : extension;
+};
+
+const hashString = (value: string) => {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(16);
+};
+
+const ensureRemoteImageFile = async (uri: string) => {
+  if (!REMOTE_IMAGE_CACHE_DIR.exists) {
+    REMOTE_IMAGE_CACHE_DIR.create({ idempotent: true, intermediates: true });
+  }
+
+  const file = new File(
+    REMOTE_IMAGE_CACHE_DIR,
+    `${hashString(uri)}${getRemoteImageExtension(uri)}`
+  );
+  if (!file.exists) {
+    await File.downloadFileAsync(uri, file, { idempotent: true });
+  }
+  return file.uri;
+};
 
 const decodedImageCache = new Map<string, SkImage>();
 const decodePromiseCache = new Map<string, Promise<SkImage | null>>();
@@ -20,7 +53,9 @@ async function decodeSkiaImage(source: SkiaImageSource): Promise<SkImage | null>
     }
     uri = asset.localUri ?? asset.uri;
   } else {
-    uri = source;
+    uri = source.startsWith('http://') || source.startsWith('https://')
+      ? await ensureRemoteImageFile(source)
+      : source;
   }
 
   const data = await Skia.Data.fromURI(uri);

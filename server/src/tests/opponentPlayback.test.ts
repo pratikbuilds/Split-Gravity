@@ -53,6 +53,23 @@ test('enqueueOpponentSnapshot resets the queue for non-running phases', () => {
   assert.equal(queue[0].phase, 'countdown');
 });
 
+test('enqueueOpponentSnapshot snaps to the first live running snapshot after countdown', () => {
+  const queue = enqueueOpponentSnapshot(
+    [
+      {
+        ...buildSnapshot({ seq: 0, phase: 'countdown', countdownLocked: 1, worldX: 0 }),
+        receivedAt: 1_000,
+      },
+    ],
+    buildSnapshot({ seq: 1, phase: 'running', countdownLocked: 0, worldX: 124 }),
+    1_016
+  );
+
+  assert.equal(queue.length, 1);
+  assert.equal(queue[0].phase, 'running');
+  assert.equal(queue[0].worldX, 124);
+});
+
 test('sampleOpponentSnapshot interpolates between buffered snapshots', () => {
   const queue = [
     { ...buildSnapshot({ seq: 1, worldX: 100, normalizedY: 0.1 }), receivedAt: 1_000 },

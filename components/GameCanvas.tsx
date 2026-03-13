@@ -35,6 +35,13 @@ import { COUNTDOWN_DIGIT_ASSETS } from './game/worldAssetSources';
 const SCORE_DISPLAY_BUCKET = 10;
 const OPPONENT_SCORE_DISPLAY_BUCKET = 10;
 const DEBUG_OVERLAY_UPDATE_MS = 80;
+const DEBUG_CANVAS_LAYER = 'full' as
+  | 'empty'
+  | 'background'
+  | 'platforms'
+  | 'character'
+  | 'opponent'
+  | 'full';
 const resolveCountdownDigit = (remainingMs: number): 5 | 4 | 3 | 2 | 1 | null => {
   if (remainingMs > 4_000) return 5;
   if (remainingMs > 3_000) return 4;
@@ -700,22 +707,33 @@ export const GameCanvas = ({
 
       <GestureDetector gesture={tapGesture}>
         <Canvas style={styles.canvas}>
-          {backgroundPicture && (
+          {DEBUG_CANVAS_LAYER !== 'empty' && backgroundPicture && (
             <Group transform={backgroundTransform}>
               <Picture picture={backgroundPicture} />
             </Group>
           )}
-          {platformsPicture && (
+          {(DEBUG_CANVAS_LAYER === 'platforms' ||
+            DEBUG_CANVAS_LAYER === 'character' ||
+            DEBUG_CANVAS_LAYER === 'opponent' ||
+            DEBUG_CANVAS_LAYER === 'full') &&
+            platformsPicture && (
             <Group transform={platformsTransform}>
               <Picture picture={platformsPicture} />
             </Group>
-          )}
-          {colliderDebugPicture && (
+            )}
+          {(DEBUG_CANVAS_LAYER === 'platforms' ||
+            DEBUG_CANVAS_LAYER === 'character' ||
+            DEBUG_CANVAS_LAYER === 'opponent' ||
+            DEBUG_CANVAS_LAYER === 'full') &&
+            colliderDebugPicture && (
             <Group transform={platformsTransform}>
               <Picture picture={colliderDebugPicture} />
             </Group>
-          )}
-          {characterImage && (
+            )}
+          {(DEBUG_CANVAS_LAYER === 'character' ||
+            DEBUG_CANVAS_LAYER === 'opponent' ||
+            DEBUG_CANVAS_LAYER === 'full') &&
+            characterImage && (
             <Group transform={characterRenderTransform}>
               <Atlas
                 image={characterImage}
@@ -723,8 +741,10 @@ export const GameCanvas = ({
                 transforms={characterTransforms}
               />
             </Group>
-          )}
-          {opponentCharacterId && opponentImage ? (
+            )}
+          {(DEBUG_CANVAS_LAYER === 'opponent' || DEBUG_CANVAS_LAYER === 'full') &&
+          opponentCharacterId &&
+          opponentImage ? (
             <Group transform={opponentRenderTransform}>
               <Atlas
                 image={opponentImage}

@@ -30,6 +30,13 @@ export const enqueueOpponentSnapshot = (
     if (last.playerId !== snapshot.playerId) {
       return [nextEntry];
     }
+    if (
+      (last.phase !== 'running' || last.countdownLocked === 1) &&
+      snapshot.phase === 'running' &&
+      snapshot.countdownLocked === 0
+    ) {
+      return [nextEntry];
+    }
     if (snapshot.seq <= last.seq) {
       return queue;
     }

@@ -250,7 +250,10 @@ function AppContent() {
   }, []);
 
   const preloadGameEnvironment = useCallback(() => {
-    return preloadAssets(GAME_ENVIRONMENT_ASSETS);
+    return Promise.all([
+      preloadAssets(GAME_ENVIRONMENT_ASSETS),
+      preloadSkiaImages(GAME_ENVIRONMENT_ASSETS),
+    ]).then(() => undefined);
   }, [preloadAssets]);
 
   const preloadCharacters = useCallback(
