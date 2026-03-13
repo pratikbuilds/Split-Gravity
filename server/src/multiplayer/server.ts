@@ -24,6 +24,7 @@ import {
   getRoomOpponent,
   type QueueEntry,
   queueBucketKey,
+  resetPlayerRoundState,
   type Room,
   roomSummary,
   snapshotRoom,
@@ -60,11 +61,10 @@ export const startServer = async () => {
           (e instanceof Error && e.message.includes('ECONNREFUSED'))
       );
     if (isDbConnection) {
-      logAt(
-        'warn',
-        'character_generation.worker_skipped',
-        { reason: 'database_unavailable', detail: msg }
-      );
+      logAt('warn', 'character_generation.worker_skipped', {
+        reason: 'database_unavailable',
+        detail: msg,
+      });
     } else {
       throw err;
     }
@@ -368,7 +368,7 @@ export const startServer = async () => {
     room.readyPlayerIds.clear();
     room.result = undefined;
     for (const p of room.players.values()) {
-      p.alive = true;
+      resetPlayerRoundState(p);
     }
     emitRoomState(room);
     scheduleRoomCleanup(room, REMATCH_LOBBY_TTL_MS);
@@ -403,7 +403,7 @@ export const startServer = async () => {
 
     clearRoomCleanup(room);
     for (const p of room.players.values()) {
-      p.alive = true;
+      resetPlayerRoundState(p);
     }
 
     room.state = 'COUNTDOWN';
@@ -1208,9 +1208,7 @@ export const startServer = async () => {
             socket.emit('error', {
               code: 'QUEUE_LEAVE_FAILED',
               message:
-                error instanceof Error
-                  ? error.message
-                  : 'Unable to cancel the paid queue entry.',
+                error instanceof Error ? error.message : 'Unable to cancel the paid queue entry.',
             });
           }
         })(),

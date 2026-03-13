@@ -21,6 +21,7 @@ export const LANDING_MIN_OVERLAP = 4;
 export const BACKGROUND_SCROLL_FACTOR = 0.2;
 export const PLAYER_X_FACTOR = 0.2;
 export const OPPONENT_X_FACTOR = 0.34;
+export const OPPONENT_LERP_SPEED = 18;
 
 export const tileSize = WORLD_TILE_SIZE;
 export const groundHeight = 2 * tileSize;

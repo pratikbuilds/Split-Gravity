@@ -5,6 +5,7 @@ import type {
   Chunk,
   GameAudioEvent,
   GameResult,
+  OpponentPose,
   OpponentSnapshot,
   Platform,
   TerrainTheme,
@@ -40,6 +41,7 @@ export type GameCanvasProps = {
     scroll: number;
     alive: boolean;
     score: number;
+    pose: OpponentPose;
     frameIndex: number;
     velocityY: number;
     flipLocked: 0 | 1;
@@ -71,6 +73,7 @@ export interface SimulationRefs {
   opponentPosY: SharedValue<number>;
   opponentGravity: SharedValue<number>;
   opponentAlive: SharedValue<number>;
+  opponentPoseCode: SharedValue<number>;
   opponentFrameIndex: SharedValue<number>;
   opponentVelocityY: SharedValue<number>;
   opponentFlipLocked: SharedValue<number>;

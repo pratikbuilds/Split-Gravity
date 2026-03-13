@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useMobileWallet } from '@wallet-ui/react-native-web3js';
+import { useWallet } from '../hooks/useWallet';
 import type {
   DailyContest,
   PaymentIntentPurpose,
@@ -84,7 +84,7 @@ const formatScreenError = (error: unknown, fallbackSummary: string): ScreenError
 };
 
 export const PaidModeSetupScreen = ({ purpose, onBack, onComplete }: PaidModeSetupScreenProps) => {
-  const { account, connect, disconnect, signAndSendTransaction, signIn } = useMobileWallet();
+  const { account, connect, disconnect, signAndSendTransaction, signIn } = useWallet();
   const [tokens, setTokens] = useState<SupportedToken[]>([]);
   const [contests, setContests] = useState<DailyContest[]>([]);
   const [contestId, setContestId] = useState<string | null>(null);

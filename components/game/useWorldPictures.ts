@@ -25,6 +25,7 @@ import {
   resolveGeneratedSpriteActions,
   resolveSpriteReferenceHeight,
 } from './generatedSpriteSheet';
+import { OPPONENT_POSE_FALL, OPPONENT_POSE_IDLE, OPPONENT_POSE_JUMP } from './multiplayerPose';
 import { useSkiaImageAsset } from './skiaImageCache';
 import type { SimulationRefs } from './types';
 import { MIDDLE_PLATFORM_ASSETS, TERRAIN_TILE_ASSETS } from './worldAssetSources';
@@ -57,6 +58,24 @@ const resolveCharacterFrame = (
     return resolveAnimatedFrame(preset.actions.jump, preset.frameSlowdowns.jump, frameIndex);
   }
   if (Math.abs(velocityY) > AIRBORNE_VEL_THRESHOLD) {
+    return resolveAnimatedFrame(preset.actions.fall, preset.frameSlowdowns.fall, frameIndex);
+  }
+  return preset.actions.run[frameIndex % preset.actions.run.length];
+};
+
+const resolveCharacterFrameForPoseCode = (
+  preset: CharacterSpritePreset,
+  poseCode: number,
+  frameIndex: number
+): SpriteFrame => {
+  'worklet';
+  if (poseCode === OPPONENT_POSE_IDLE) {
+    return resolveAnimatedFrame(preset.actions.idle, preset.frameSlowdowns.idle, frameIndex);
+  }
+  if (poseCode === OPPONENT_POSE_JUMP) {
+    return resolveAnimatedFrame(preset.actions.jump, preset.frameSlowdowns.jump, frameIndex);
+  }
+  if (poseCode === OPPONENT_POSE_FALL) {
     return resolveAnimatedFrame(preset.actions.fall, preset.frameSlowdowns.fall, frameIndex);
   }
   return preset.actions.run[frameIndex % preset.actions.run.length];
@@ -112,6 +131,7 @@ interface UseWorldPicturesArgs {
     | 'opponentPosY'
     | 'opponentGravity'
     | 'opponentAlive'
+    | 'opponentPoseCode'
     | 'opponentFrameIndex'
     | 'opponentVelocityY'
     | 'opponentFlipLocked'
@@ -182,9 +202,7 @@ export const useWorldPictures = ({
     characterCustomSpriteUrl ?? fallbackCharacterPreset.imageSource
   );
   const opponentImage = useSkiaImageAsset(
-    hasOpponentCharacter
-      ? opponentCustomSpriteUrl ?? fallbackOpponentPreset.imageSource
-      : null
+    hasOpponentCharacter ? (opponentCustomSpriteUrl ?? fallbackOpponentPreset.imageSource) : null
   );
   const characterPreset = useMemo(() => {
     if (characterCustomSpriteUrl && characterImage) {
@@ -229,14 +247,20 @@ export const useWorldPictures = ({
     const airborne = isAirborne(refs.flipLockedUntilLanding.value, refs.velocityY.value);
     const hitboxSize = CHAR_SIZE * CHAR_SCALE;
     const scaleBoost = airborne ? JUMP_SCALE_BOOST : 1;
-    const { scale, feetTrim } = resolveRenderMetrics(characterPreset, frame, hitboxSize, scaleBoost);
+    const { scale, feetTrim } = resolveRenderMetrics(
+      characterPreset,
+      frame,
+      hitboxSize,
+      scaleBoost
+    );
     const gDir = refs.gravityDirection.value;
     const { x, y } = resolveSpriteBasePosition({
       frame,
       scale,
       gravityDirection: gDir,
       worldAnchorX: refs.charX.value + hitboxSize / 2,
-      worldAnchorY: gDir === -1 ? refs.posY.value - feetTrim : refs.posY.value + hitboxSize + feetTrim,
+      worldAnchorY:
+        gDir === -1 ? refs.posY.value - feetTrim : refs.posY.value + hitboxSize + feetTrim,
     });
     val.set(scale, 0, x, y);
   });
@@ -247,11 +271,9 @@ export const useWorldPictures = ({
       val.set(1, 0, -10_000, -10_000);
       return;
     }
-    const frame = resolveCharacterFrame(
+    const frame = resolveCharacterFrameForPoseCode(
       opponentPreset,
-      refs.opponentCountdownLocked.value,
-      refs.opponentFlipLocked.value,
-      refs.opponentVelocityY.value,
+      refs.opponentPoseCode.value,
       refs.opponentFrameIndex.value
     );
     const hitboxSize = CHAR_SIZE * CHAR_SCALE;
@@ -271,7 +293,26 @@ export const useWorldPictures = ({
     val.set(scale, 0, x, y);
   });
 
+  const opponentRenderTransform = useDerivedValue(() => {
+    'worklet';
+    const gDir = refs.opponentGravity.value;
+    if (gDir !== -1) return [{ translateY: 0 }];
+
+    const frame = resolveCharacterFrameForPoseCode(
+      opponentPreset,
+      refs.opponentPoseCode.value,
+      refs.opponentFrameIndex.value
+    );
+    const hitboxSize = CHAR_SIZE * CHAR_SCALE;
+    const { feetTrim, renderHeight } = resolveRenderMetrics(opponentPreset, frame, hitboxSize, 1);
+    const baseY = refs.opponentPosY.value - feetTrim;
+    const pivotY = baseY + renderHeight / 2;
+
+    return [{ translateY: pivotY }, { scaleY: -1 }, { translateY: -pivotY }];
+  });
+
   const characterRenderTransform = useDerivedValue(() => {
+    'worklet';
     const gDir = refs.gravityDirection.value;
     if (gDir !== -1) return [{ translateY: 0 }];
 
@@ -297,26 +338,8 @@ export const useWorldPictures = ({
     return [{ translateY: pivotY }, { scaleY: -1 }, { translateY: -pivotY }];
   });
 
-  const opponentRenderTransform = useDerivedValue(() => {
-    const gDir = refs.opponentGravity.value;
-    if (gDir !== -1) return [{ translateY: 0 }];
-
-    const frame = resolveCharacterFrame(
-      opponentPreset,
-      refs.opponentCountdownLocked.value,
-      refs.opponentFlipLocked.value,
-      refs.opponentVelocityY.value,
-      refs.opponentFrameIndex.value
-    );
-    const hitboxSize = CHAR_SIZE * CHAR_SCALE;
-    const { feetTrim, renderHeight } = resolveRenderMetrics(opponentPreset, frame, hitboxSize, 1);
-    const baseY = refs.opponentPosY.value - feetTrim;
-    const pivotY = baseY + renderHeight / 2;
-
-    return [{ translateY: pivotY }, { scaleY: -1 }, { translateY: -pivotY }];
-  });
-
   const characterSprites = useDerivedValue(() => {
+    'worklet';
     const frame = resolveCharacterFrame(
       characterPreset,
       refs.countdownLocked.value,
@@ -328,11 +351,10 @@ export const useWorldPictures = ({
   });
 
   const opponentSprites = useDerivedValue(() => {
-    const frame = resolveCharacterFrame(
+    'worklet';
+    const frame = resolveCharacterFrameForPoseCode(
       opponentPreset,
-      refs.opponentCountdownLocked.value,
-      refs.opponentFlipLocked.value,
-      refs.opponentVelocityY.value,
+      refs.opponentPoseCode.value,
       refs.opponentFrameIndex.value
     );
     return [rect(frame.x, frame.y, frame.width, frame.height)];
@@ -363,6 +385,7 @@ export const useWorldPictures = ({
   }, [backgroundImage, width, height]);
 
   const backgroundTransform = useDerivedValue(() => {
+    'worklet';
     if (backgroundTileWidth <= 0) return [{ translateX: 0 }];
     const offset = (refs.totalScroll.value * BACKGROUND_SCROLL_FACTOR) % backgroundTileWidth;
     return [{ translateX: -offset }];
@@ -636,10 +659,14 @@ export const useWorldPictures = ({
   }, [height, width, platforms]);
 
   const platformsTransform = useDerivedValue(() => {
+    'worklet';
     return [{ translateX: -refs.totalScroll.value }];
   });
 
-  const opponentVisible = useDerivedValue(() => refs.opponentAlive.value === 1);
+  const opponentVisible = useDerivedValue(() => {
+    'worklet';
+    return refs.opponentAlive.value === 1;
+  });
   const worldAssetsReady =
     backgroundPicture !== null &&
     platformsPicture !== null &&

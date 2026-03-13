@@ -1,12 +1,12 @@
 import { memo } from 'react';
 import { Text, View } from 'react-native';
-import { useMobileWallet } from '@wallet-ui/react-native-web3js';
+import { useWallet } from '../../hooks/useWallet';
 import { getWalletAddress } from '../../utils/wallet/account';
 
 const shortenAddress = (address: string) => `${address.slice(0, 4)}...${address.slice(-4)}`;
 
 function WalletStatusChipComponent() {
-  const { account } = useMobileWallet();
+  const { account } = useWallet();
   const walletAddress = getWalletAddress(account);
 
   if (!walletAddress) return null;

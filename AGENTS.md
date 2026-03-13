@@ -120,4 +120,9 @@ Three visual themes: `grass`, `purple`, `stone` — each with top/topLeft/topRig
 - User-supplied character sprite sheets in this project are often 5504×3072; use this as the canonical size when adding or swapping character atlases.
 - Pillars in level sections are optional; not every section needs pillars—ledge-only and variable-height-only sections are valid.
 
+## iOS development build
+
+- **Prebuild:** `pnpm prebuild --platform ios` (or `expo prebuild --platform ios`) generates the `ios/` folder. Required for development builds.
+- **Run on simulator:** `pnpm ios` (or `expo run:ios`). Requires the **iOS Simulator runtime** for your Xcode’s SDK to be installed (e.g. Xcode 26 → install “iOS 26.2 Simulator” in **Xcode > Settings > Components**). If `xcodebuild` reports “Unable to find a destination” or “iOS 26.x is not installed”, run `pnpm ios:download-simulator` (or install via **Xcode > Settings > Components**). Wait for the ~8 GB download to finish, then run `pnpm ios` again.
+
 eas build --profile preview --platform android

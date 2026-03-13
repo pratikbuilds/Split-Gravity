@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useMobileWallet } from '@wallet-ui/react-native-web3js';
+import { useWallet } from './useWallet';
 import { backendApi } from '../services/backend/api';
 import { getWalletAddress } from '../utils/wallet/account';
 import { createWalletVerifyRequest } from '../utils/wallet/auth';
@@ -14,7 +14,7 @@ type StoredWalletSession = {
 };
 
 export const useWalletSession = () => {
-  const wallet = useMobileWallet();
+  const wallet = useWallet();
   const walletAddress = getWalletAddress(wallet.account);
   const [storedSession, setStoredSession] = useState<StoredWalletSession | null>(null);
   const [loading, setLoading] = useState(true);

@@ -21,15 +21,14 @@ import {
   DEATH_MARGIN_FRACTION,
   EDGE_CONTACT_MARGIN,
   ENABLE_COLLIDER_DEBUG_UI,
-  GRAVITY,
+  OPPONENT_LERP_SPEED,
   OPPONENT_X_FACTOR,
   groundHeight,
 } from './game/constants';
 import { useGameGestures } from './game/useGameGestures';
 import { useGameSimulation } from './game/useGameSimulation';
+import { OPPONENT_POSE_IDLE, resolvePoseCode } from './game/multiplayerPose';
 import { useScoreAndChunks } from './game/useScoreAndChunks';
-import { normalizeFrameStep } from '../shared/game/physics';
-
 import type { GameCanvasProps, GravityDirection, SimulationRefs } from './game/types';
 import { useWorldPictures } from './game/useWorldPictures';
 import { COUNTDOWN_DIGIT_ASSETS } from './game/worldAssetSources';
@@ -37,8 +36,6 @@ import { COUNTDOWN_DIGIT_ASSETS } from './game/worldAssetSources';
 const SCORE_DISPLAY_BUCKET = 10;
 const OPPONENT_SCORE_DISPLAY_BUCKET = 10;
 const DEBUG_OVERLAY_UPDATE_MS = 80;
-const OPPONENT_AIRBORNE_VELOCITY_THRESHOLD = 10;
-
 const resolveCountdownDigit = (remainingMs: number): 5 | 4 | 3 | 2 | 1 | null => {
   if (remainingMs > 4_000) return 5;
   if (remainingMs > 3_000) return 4;
@@ -327,8 +324,10 @@ export const GameCanvas = ({
   const platformRects = useSharedValue<number[]>([]);
   const lastMultiplayerStateAtMs = useSharedValue(0);
   const opponentPosY = useSharedValue(0);
+  const opponentTargetY = useSharedValue(0);
   const opponentGravity = useSharedValue(1);
   const opponentAlive = useSharedValue(0);
+  const opponentPoseCode = useSharedValue<number>(OPPONENT_POSE_IDLE);
   const opponentFrameIndex = useSharedValue(0);
   const opponentVelocityY = useSharedValue(0);
   const opponentFlipLocked = useSharedValue(0);
@@ -358,6 +357,7 @@ export const GameCanvas = ({
       opponentPosY,
       opponentGravity,
       opponentAlive,
+      opponentPoseCode,
       opponentFrameIndex,
       opponentVelocityY,
       opponentFlipLocked,
@@ -382,6 +382,7 @@ export const GameCanvas = ({
       opponentFlipLocked,
       opponentFrameIndex,
       opponentGravity,
+      opponentPoseCode,
       opponentPosY,
       opponentVelocityY,
       platformRects,
@@ -460,16 +461,16 @@ export const GameCanvas = ({
     width,
     height,
     backgroundIndex,
-      terrainTheme,
-      characterId,
-      characterCustomSpriteUrl,
-      characterCustomSpriteAnimation,
-      opponentCharacterId,
-      opponentCustomSpriteUrl,
-      opponentCustomSpriteAnimation,
-      platforms,
-      refs,
-    });
+    terrainTheme,
+    characterId,
+    characterCustomSpriteUrl,
+    characterCustomSpriteAnimation,
+    opponentCharacterId,
+    opponentCustomSpriteUrl,
+    opponentCustomSpriteAnimation,
+    platforms,
+    refs,
+  });
 
   useEffect(() => {
     void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
@@ -480,13 +481,29 @@ export const GameCanvas = ({
     const opponentSpawnGravity =
       opponentInitialGravityDirection ?? (initialGravityDirection === 1 ? -1 : 1);
     opponentGravity.value = opponentSpawnGravity;
-    opponentPosY.value = opponentSpawnGravity === -1 ? groundHeight : stableGroundY - charH;
+    const spawnY = opponentSpawnGravity === -1 ? groundHeight : stableGroundY - charH;
+    opponentPosY.value = spawnY;
+    opponentTargetY.value = spawnY;
+    opponentAlive.value = opponentCharacterId ? 1 : 0;
+    opponentPoseCode.value = OPPONENT_POSE_IDLE;
+    opponentFrameIndex.value = 0;
+    opponentVelocityY.value = 0;
+    opponentFlipLocked.value = 0;
+    opponentCountdownLocked.value = 1;
   }, [
     charSize,
     initialGravityDirection,
+    opponentCharacterId,
+    opponentAlive,
+    opponentCountdownLocked,
+    opponentFlipLocked,
+    opponentFrameIndex,
     opponentGravity,
     opponentInitialGravityDirection,
     opponentPosY,
+    opponentPoseCode,
+    opponentTargetY,
+    opponentVelocityY,
     restartKey,
     stableGroundY,
   ]);
@@ -589,6 +606,7 @@ export const GameCanvas = ({
     restartKey,
     effectiveMultiplayerCountdownStartAt,
     triggerAudioEvent,
+    worldAssetsReady,
   ]);
 
   // Unlock when assets become ready after countdown has finished
@@ -600,7 +618,13 @@ export const GameCanvas = ({
     }
     countdownLocked.value = 0;
     refs.initialized.value = 1;
-  }, [worldAssetsReady, countdownDigit, effectiveMultiplayerCountdownStartAt, countdownLocked, refs.initialized]);
+  }, [
+    worldAssetsReady,
+    countdownDigit,
+    effectiveMultiplayerCountdownStartAt,
+    countdownLocked,
+    refs.initialized,
+  ]);
 
   const countdownImageSource = useMemo(() => {
     if (countdownDigit === 1) return COUNTDOWN_DIGIT_ASSETS[1];
@@ -626,13 +650,14 @@ export const GameCanvas = ({
         return;
       }
       const laneSpan = Math.max(1, height - 2 * groundHeight - charSize);
-      opponentPosY.value = groundHeight + snapshot.normalizedY * laneSpan;
+      opponentTargetY.value = groundHeight + snapshot.normalizedY * laneSpan;
       opponentGravity.value = snapshot.gravityDir;
       opponentAlive.value = snapshot.alive ? 1 : 0;
+      opponentPoseCode.value = resolvePoseCode(snapshot.pose);
       opponentFrameIndex.value = snapshot.frameIndex;
       opponentVelocityY.value = snapshot.velocityY;
       opponentFlipLocked.value = snapshot.flipLocked;
-      opponentCountdownLocked.value = snapshot.countdownLocked;
+      opponentCountdownLocked.value = snapshot.phase === 'running' ? snapshot.countdownLocked : 1;
     },
     [
       charSize,
@@ -642,7 +667,8 @@ export const GameCanvas = ({
       opponentFlipLocked,
       opponentFrameIndex,
       opponentGravity,
-      opponentPosY,
+      opponentPoseCode,
+      opponentTargetY,
       opponentVelocityY,
       opponentSnapshotSignal,
     ]
@@ -651,19 +677,9 @@ export const GameCanvas = ({
   useFrameCallback((frameInfo) => {
     'worklet';
     if (opponentAlive.value !== 1) return;
-    if (opponentCountdownLocked.value === 1) return;
-
-    const airborne =
-      opponentFlipLocked.value === 1 ||
-      Math.abs(opponentVelocityY.value) > OPPONENT_AIRBORNE_VELOCITY_THRESHOLD;
-    if (!airborne) return;
-
     const rawDt = frameInfo.timeSincePreviousFrame ?? 16;
-    const { stepCount, stepDt } = normalizeFrameStep(rawDt);
-    for (let step = 0; step < stepCount; step += 1) {
-      opponentVelocityY.value += opponentGravity.value * GRAVITY * (stepDt / 1000);
-      opponentPosY.value += opponentVelocityY.value * (stepDt / 1000);
-    }
+    const t = Math.min((rawDt / 1000) * OPPONENT_LERP_SPEED, 1);
+    opponentPosY.value += (opponentTargetY.value - opponentPosY.value) * t;
   });
 
   const opponentX = width * OPPONENT_X_FACTOR;

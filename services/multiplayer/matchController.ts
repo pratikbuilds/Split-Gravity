@@ -1,4 +1,6 @@
 import type {
+  CharacterPose,
+  MatchPhase,
   MatchRoomKind,
   MatchResult,
   MatchStatePacket,
@@ -44,6 +46,11 @@ export type MultiplayerViewState = {
   queueEntryId: string | null;
 };
 
+type PendingAction = MultiplayerViewState['pendingAction'];
+type ActivePendingAction = Exclude<PendingAction, 'none'>;
+
+const PENDING_ACTION_TIMEOUT_MS = 10_000;
+
 const initialViewState: MultiplayerViewState = {
   connected: false,
   connectionState: 'connected',
@@ -80,8 +87,10 @@ export class MultiplayerMatchController {
   private pendingJoin: RoomJoinPayload | null = null;
   private pendingQueueJoin: QueueJoinPayload | null = null;
   private lastStateSentAt = 0;
-  private lastSentState: Omit<MatchStatePacket, 't'> | null = null;
+  private lastSentState: Omit<MatchStatePacket, 't' | 'seq'> | null = null;
+  private lastSentSeq = 0;
   private countdownTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingRequestTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionallyDisconnecting = false;
 
   constructor(serverUrl = resolveConfiguredBackendUrl()) {
@@ -104,33 +113,132 @@ export class MultiplayerMatchController {
     this.opponentListeners.forEach((listener) => listener(snapshot));
   }
 
-  private buildInitialOpponentSnapshot(startAt: number): OpponentSnapshot | null {
-    const localPlayer = this.state.localPlayer;
-    const opponent = this.state.opponent;
-    if (!localPlayer || !opponent) return null;
+  private debugLog(event: string, details?: Record<string, unknown>) {
+    if (typeof __DEV__ === 'undefined' || !__DEV__) return;
+    if (details) {
+      console.info(`[multiplayer] ${event}`, details);
+      return;
+    }
+    console.info(`[multiplayer] ${event}`);
+  }
 
+  private buildBaselineOpponentSnapshot(
+    phase: MatchPhase,
+    options?: {
+      t?: number;
+      pose?: CharacterPose;
+      localPlayer?: PlayerSession | null;
+      opponent?: PlayerSession | null;
+    }
+  ): OpponentSnapshot | null {
+    const localPlayer = options?.localPlayer ?? this.state.localPlayer;
+    const opponent = options?.opponent ?? this.state.opponent;
+    if (!localPlayer || !opponent) return null;
     const localStartsBottom = localPlayer.playerId.localeCompare(opponent.playerId) <= 0;
     const opponentGravityDir: 1 | -1 = localStartsBottom ? -1 : 1;
+    const existing = this.state.opponentSnapshot;
+    const defaultPose: CharacterPose = phase === 'running' ? 'run' : 'idle';
 
     return {
       playerId: opponent.playerId,
       nickname: opponent.nickname,
+      phase,
+      pose: options?.pose ?? defaultPose,
+      seq: existing?.playerId === opponent.playerId ? existing.seq : 0,
       normalizedY: opponentGravityDir === -1 ? 0 : 1,
       gravityDir: opponentGravityDir,
-      scroll: 0,
-      alive: true,
-      score: 0,
-      t: startAt,
-      frameIndex: 0,
+      scroll: phase === 'running' ? (existing?.scroll ?? 0) : 0,
+      alive: phase === 'result' ? Boolean(opponent.alive) : true,
+      score: phase === 'running' ? (existing?.score ?? 0) : 0,
+      t: options?.t ?? Date.now(),
+      frameIndex: existing?.playerId === opponent.playerId ? existing.frameIndex : 0,
       velocityY: 0,
       flipLocked: 0,
-      countdownLocked: 1,
+      countdownLocked: phase === 'running' ? 0 : 1,
     };
+  }
+
+  private resetOutgoingStateTracking() {
+    this.lastSentState = null;
+    this.lastStateSentAt = 0;
+    this.lastSentSeq = 0;
   }
 
   private setState(partial: Partial<MultiplayerViewState>) {
     this.state = { ...this.state, ...partial };
     this.emitState();
+  }
+
+  private clearPendingRequestTimer() {
+    if (!this.pendingRequestTimer) return;
+    clearTimeout(this.pendingRequestTimer);
+    this.pendingRequestTimer = null;
+  }
+
+  private clearPendingPayloads(action?: ActivePendingAction) {
+    if (!action || action === 'creating_room') {
+      this.pendingCreate = null;
+    }
+    if (!action || action === 'joining_room') {
+      this.pendingJoin = null;
+    }
+    if (!action || action === 'queueing' || action === 'leaving_queue') {
+      this.pendingQueueJoin = null;
+    }
+  }
+
+  private getPendingTimeoutMessage(action: ActivePendingAction) {
+    switch (action) {
+      case 'creating_room':
+        return 'Room creation timed out. Check the connection and try again.';
+      case 'joining_room':
+        return 'Joining the room timed out. Check the room code and try again.';
+      case 'queueing':
+        return 'Queue join timed out. Try again in a moment.';
+      case 'leaving_queue':
+        return 'Leaving the queue timed out. Try again in a moment.';
+      case 'readying':
+        return 'Ready confirmation timed out. Try again.';
+    }
+  }
+
+  private getPendingRollbackState(action?: ActivePendingAction): Partial<MultiplayerViewState> {
+    if (action === 'queueing') {
+      return {
+        queueStatus: 'idle',
+        queueEntryId: null,
+      };
+    }
+    if (action === 'leaving_queue') {
+      return {
+        queueStatus: this.state.queueEntryId ? 'queued' : 'idle',
+      };
+    }
+    return {};
+  }
+
+  private beginPendingRequest(action: ActivePendingAction) {
+    this.clearPendingRequestTimer();
+    this.pendingRequestTimer = setTimeout(() => {
+      if (this.state.pendingAction !== action) return;
+
+      this.debugLog('request.timeout', {
+        action,
+        serverUrl: this.serverUrl,
+        connected: this.socket.connected,
+      });
+      this.clearPendingPayloads(action);
+      this.setState({
+        pendingAction: 'none',
+        errorMessage: this.getPendingTimeoutMessage(action),
+        ...this.getPendingRollbackState(action),
+      });
+    }, PENDING_ACTION_TIMEOUT_MS);
+  }
+
+  private resolvePendingRequest(action?: ActivePendingAction) {
+    this.clearPendingRequestTimer();
+    this.clearPendingPayloads(action);
   }
 
   private leaveRoomIfNeeded() {
@@ -146,6 +254,7 @@ export class MultiplayerMatchController {
   private registerSocketHandlers() {
     this.socket.on('connect', () => {
       this.intentionallyDisconnecting = false;
+      this.debugLog('socket.connected', { serverUrl: this.serverUrl });
       this.setState({
         connected: true,
         connectionState: 'connected',
@@ -153,14 +262,18 @@ export class MultiplayerMatchController {
         errorMessage: null,
       });
       if (this.pendingCreate) {
+        this.debugLog('room.create.emit', { roomKind: this.pendingCreate.roomKind ?? 'casual' });
         this.socket.emit('room:create', this.pendingCreate);
-        this.pendingCreate = null;
       }
       if (this.pendingJoin) {
+        this.debugLog('room.join.emit', { roomCode: this.pendingJoin.roomCode });
         this.socket.emit('room:join', this.pendingJoin);
-        this.pendingJoin = null;
       }
       if (this.pendingQueueJoin) {
+        this.debugLog('queue.join.emit', {
+          tokenId: this.pendingQueueJoin.tokenId,
+          entryFeeTierId: this.pendingQueueJoin.entryFeeTierId,
+        });
         this.socket.emit('queue:join', this.pendingQueueJoin);
       }
       if (
@@ -182,8 +295,13 @@ export class MultiplayerMatchController {
 
     this.socket.on('disconnect', () => {
       this.clearCountdownTimer();
+      this.debugLog('socket.disconnected', {
+        intentional: this.intentionallyDisconnecting,
+        pendingAction: this.state.pendingAction,
+      });
       if (this.intentionallyDisconnecting) {
         this.intentionallyDisconnecting = false;
+        this.resolvePendingRequest();
         this.setState({
           connected: false,
           connectionState: 'connected',
@@ -198,19 +316,32 @@ export class MultiplayerMatchController {
     this.socket.on('connect_error', (error) => {
       this.intentionallyDisconnecting = false;
       const reason = error.message || 'connection failed';
+      const pendingAction =
+        this.state.pendingAction !== 'none' ? this.state.pendingAction : undefined;
+      this.debugLog('socket.connect_error', {
+        message: reason,
+        pendingAction: this.state.pendingAction,
+      });
+      this.resolvePendingRequest();
       this.setState({
         connected: false,
         connectionState: 'reconnecting',
         pendingAction: 'none',
         errorMessage: `Cannot reach server at ${this.serverUrl}. ${reason}`,
+        ...this.getPendingRollbackState(pendingAction),
       });
     });
 
     this.socket.on('room:created', ({ roomCode, player, roomKind }) => {
+      this.debugLog('room.created', { roomCode, roomKind: roomKind ?? this.state.roomKind });
+      this.resolvePendingRequest(
+        this.state.pendingAction !== 'none' ? this.state.pendingAction : undefined
+      );
       this.setState({
         roomCode,
         localPlayer: player,
         matchStatus: 'lobby',
+        countdownStartAt: null,
         multiplayerResult: null,
         pendingAction: 'none',
         errorMessage: null,
@@ -221,12 +352,22 @@ export class MultiplayerMatchController {
     });
 
     this.socket.on('room:state', (room) => {
+      this.debugLog('room.state', {
+        roomCode: room.roomCode,
+        state: room.state,
+        players: room.players.length,
+      });
       this.syncRoomState(room);
     });
 
     this.socket.on('match:start', ({ startAt }) => {
       this.clearCountdownTimer();
-      const initialOpponentSnapshot = this.buildInitialOpponentSnapshot(startAt);
+      this.resolvePendingRequest();
+      this.resetOutgoingStateTracking();
+      const initialOpponentSnapshot = this.buildBaselineOpponentSnapshot('countdown', {
+        t: startAt,
+        pose: 'idle',
+      });
       this.setState({
         matchStatus: 'countdown',
         countdownStartAt: startAt,
@@ -246,11 +387,12 @@ export class MultiplayerMatchController {
       const opponent = this.state.opponent;
       const snapshot = this.state.opponentSnapshot;
       if (!opponent || opponent.playerId !== playerId || !snapshot || !snapshot.alive) return;
-      if (inputType !== 'flip' || snapshot.countdownLocked === 1) return;
+      if (inputType !== 'flip' || snapshot.phase !== 'running') return;
 
       const optimisticSnapshot: OpponentSnapshot = {
         ...snapshot,
         gravityDir: snapshot.gravityDir === 1 ? -1 : 1,
+        pose: 'jump',
         velocityY: 0,
         flipLocked: 1,
         t: Math.max(snapshot.t, t),
@@ -266,10 +408,20 @@ export class MultiplayerMatchController {
     this.socket.on('match:opponentState', ({ playerId, state }) => {
       const opponent = this.state.opponent;
       if (!opponent || opponent.playerId !== playerId) return;
+      if (
+        this.state.opponentSnapshot &&
+        this.state.opponentSnapshot.playerId === playerId &&
+        state.seq < this.state.opponentSnapshot.seq
+      ) {
+        return;
+      }
 
       const snapshot: OpponentSnapshot = {
         playerId,
         nickname: opponent.nickname,
+        phase: state.phase,
+        pose: state.pose,
+        seq: state.seq,
         normalizedY: state.normalizedY,
         gravityDir: state.gravityDir,
         scroll: state.scroll,
@@ -321,7 +473,12 @@ export class MultiplayerMatchController {
     });
 
     this.socket.on('queue:state', ({ status, queueEntryId, tokenId, entryFeeTierId, message }) => {
-      this.pendingQueueJoin = null;
+      this.debugLog('queue.state', { status, queueEntryId });
+      this.resolvePendingRequest(
+        this.state.pendingAction === 'queueing' || this.state.pendingAction === 'leaving_queue'
+          ? this.state.pendingAction
+          : undefined
+      );
       this.setState({
         pendingAction: 'none',
         queueStatus: status,
@@ -333,11 +490,12 @@ export class MultiplayerMatchController {
     });
 
     this.socket.on('error', ({ code, message }) => {
+      const pendingAction =
+        this.state.pendingAction !== 'none' ? this.state.pendingAction : undefined;
+      this.debugLog('server.error', { code, message });
       if (code === 'PAID_ROOM_CANCELLED' || code === 'PAID_ROOM_EXPIRED') {
         this.clearCountdownTimer();
-        this.pendingCreate = null;
-        this.pendingJoin = null;
-        this.pendingQueueJoin = null;
+        this.resolvePendingRequest();
         this.state = {
           ...initialViewState,
           connected: this.socket.connected,
@@ -349,7 +507,12 @@ export class MultiplayerMatchController {
         return;
       }
 
-      this.setState({ errorMessage: message, pendingAction: 'none' });
+      this.resolvePendingRequest();
+      this.setState({
+        errorMessage: message,
+        pendingAction: 'none',
+        ...this.getPendingRollbackState(pendingAction),
+      });
     });
   }
 
@@ -366,6 +529,9 @@ export class MultiplayerMatchController {
     if (!localPlayer) {
       return;
     }
+    this.resolvePendingRequest(
+      this.state.pendingAction !== 'none' ? this.state.pendingAction : undefined
+    );
     const opponent = localPlayer
       ? (room.players.find((player) => player.playerId !== localPlayer.playerId) ?? null)
       : null;
@@ -382,8 +548,36 @@ export class MultiplayerMatchController {
     if (status !== 'countdown') {
       this.clearCountdownTimer();
     }
-    if (status !== 'running' && this.state.opponentSnapshot) {
-      this.emitOpponentSnapshot(null);
+
+    let nextOpponentSnapshot: OpponentSnapshot | null = null;
+    if (opponent) {
+      if (status === 'lobby') {
+        nextOpponentSnapshot = this.buildBaselineOpponentSnapshot('lobby', {
+          t: room.startedAt ?? Date.now(),
+          pose: 'idle',
+          localPlayer,
+          opponent,
+        });
+      } else if (status === 'countdown') {
+        nextOpponentSnapshot = this.buildBaselineOpponentSnapshot('countdown', {
+          t: room.startedAt ?? Date.now(),
+          pose: 'idle',
+          localPlayer,
+          opponent,
+        });
+      } else if (status === 'running') {
+        nextOpponentSnapshot =
+          this.state.opponentSnapshot?.playerId === opponent.playerId
+            ? {
+                ...this.state.opponentSnapshot,
+                phase: 'running',
+                countdownLocked: 0,
+              }
+            : this.buildBaselineOpponentSnapshot('running', {
+                localPlayer,
+                opponent,
+              });
+      }
     }
 
     const clearReconnect =
@@ -403,7 +597,9 @@ export class MultiplayerMatchController {
       opponent,
       matchStatus: status,
       countdownStartAt:
-        status === 'countdown' || status === 'running' ? this.state.countdownStartAt : null,
+        status === 'countdown' || status === 'running'
+          ? (room.startedAt ?? this.state.countdownStartAt)
+          : null,
       pendingAction: 'none',
       localReady: localPlayer ? room.readyPlayerIds.includes(localPlayer.playerId) : false,
       opponentReady: opponent ? room.readyPlayerIds.includes(opponent.playerId) : false,
@@ -413,12 +609,12 @@ export class MultiplayerMatchController {
       opponentFunded: opponent ? Boolean(room.fundedPlayerIds?.includes(opponent.playerId)) : false,
       queueStatus: room.roomKind === 'paid_queue' ? 'matched' : this.state.queueStatus,
       queueEntryId: room.roomKind === 'paid_queue' ? null : this.state.queueEntryId,
-      opponentSnapshot:
-        status === 'countdown' || status === 'running' ? this.state.opponentSnapshot : null,
+      opponentSnapshot: nextOpponentSnapshot,
       reconnectSecondsRemaining: clearReconnect ? null : this.state.reconnectSecondsRemaining,
       connectionState: nextConnectionState,
       errorMessage: null,
     });
+    this.emitOpponentSnapshot(nextOpponentSnapshot);
   }
 
   getState() {
@@ -449,9 +645,8 @@ export class MultiplayerMatchController {
 
   disconnect() {
     this.clearCountdownTimer();
-    this.pendingCreate = null;
-    this.pendingJoin = null;
-    this.pendingQueueJoin = null;
+    this.clearPendingRequestTimer();
+    this.clearPendingPayloads();
     this.leaveQueueIfNeeded();
     this.leaveRoomIfNeeded();
     if (!this.socket.connected) return;
@@ -471,6 +666,7 @@ export class MultiplayerMatchController {
       customCharacterVersionId?: string;
     }
   ) {
+    this.resetOutgoingStateTracking();
     const safeNickname = nickname.trim() || 'Player 1';
     const payload = {
       nickname: safeNickname,
@@ -497,6 +693,7 @@ export class MultiplayerMatchController {
       localReady: false,
       opponentReady: false,
       matchStatus: 'idle',
+      countdownStartAt: null,
       multiplayerResult: null,
       reconnectSecondsRemaining: null,
       opponentSnapshot: null,
@@ -508,12 +705,20 @@ export class MultiplayerMatchController {
       queueStatus: 'idle',
       queueEntryId: null,
     });
+    this.debugLog('room.create.requested', {
+      roomKind: payload.roomKind ?? 'casual',
+      connected: this.socket.connected,
+    });
     this.emitOpponentSnapshot(null);
     this.connect();
     if (this.socket.connected) {
+      this.debugLog('room.create.emit', {
+        roomKind: payload.roomKind ?? 'casual',
+        immediate: true,
+      });
       this.socket.emit('room:create', payload);
-      this.pendingCreate = null;
     }
+    this.beginPendingRequest('creating_room');
   }
 
   joinRoom(
@@ -529,6 +734,7 @@ export class MultiplayerMatchController {
       customCharacterVersionId?: string;
     }
   ) {
+    this.resetOutgoingStateTracking();
     const safeNickname = nickname.trim() || 'Player';
     const normalizedCode = roomCode.trim().toUpperCase();
     const payload = {
@@ -557,6 +763,7 @@ export class MultiplayerMatchController {
       localReady: false,
       opponentReady: false,
       matchStatus: 'idle',
+      countdownStartAt: null,
       multiplayerResult: null,
       reconnectSecondsRemaining: null,
       opponentSnapshot: null,
@@ -568,12 +775,17 @@ export class MultiplayerMatchController {
       queueStatus: 'idle',
       queueEntryId: null,
     });
+    this.debugLog('room.join.requested', {
+      roomCode: payload.roomCode,
+      connected: this.socket.connected,
+    });
     this.emitOpponentSnapshot(null);
     this.connect();
     if (this.socket.connected) {
+      this.debugLog('room.join.emit', { roomCode: payload.roomCode, immediate: true });
       this.socket.emit('room:join', payload);
-      this.pendingJoin = null;
     }
+    this.beginPendingRequest('joining_room');
   }
 
   joinPaidQueue(
@@ -587,6 +799,7 @@ export class MultiplayerMatchController {
       customCharacterVersionId?: string;
     }
   ) {
+    this.resetOutgoingStateTracking();
     const payload: QueueJoinPayload = {
       nickname: nickname.trim() || 'Player',
       clientId: this.clientId,
@@ -611,6 +824,7 @@ export class MultiplayerMatchController {
       localReady: false,
       opponentReady: false,
       matchStatus: 'idle',
+      countdownStartAt: null,
       multiplayerResult: null,
       reconnectSecondsRemaining: null,
       opponentSnapshot: null,
@@ -622,11 +836,22 @@ export class MultiplayerMatchController {
       queueStatus: 'queued',
       queueEntryId: null,
     });
+    this.debugLog('queue.join.requested', {
+      tokenId: payload.tokenId,
+      entryFeeTierId: payload.entryFeeTierId,
+      connected: this.socket.connected,
+    });
     this.emitOpponentSnapshot(null);
     this.connect();
     if (this.socket.connected) {
+      this.debugLog('queue.join.emit', {
+        tokenId: payload.tokenId,
+        entryFeeTierId: payload.entryFeeTierId,
+        immediate: true,
+      });
       this.socket.emit('queue:join', payload);
     }
+    this.beginPendingRequest('queueing');
   }
 
   leavePaidQueue() {
@@ -637,6 +862,11 @@ export class MultiplayerMatchController {
     this.setState({
       pendingAction: 'leaving_queue',
     });
+    this.debugLog('queue.leave.requested', {
+      queueEntryId,
+      connected: this.socket.connected,
+    });
+    this.beginPendingRequest('leaving_queue');
 
     if (this.socket.connected) {
       this.socket.emit('queue:leave', { queueEntryId: queueEntryId ?? undefined });
@@ -648,6 +878,8 @@ export class MultiplayerMatchController {
       return;
     if (!this.socket.connected) return;
     this.setState({ pendingAction: 'readying' });
+    this.debugLog('room.ready.requested', { roomCode: this.state.roomCode });
+    this.beginPendingRequest('readying');
     this.socket.emit('room:ready', { roomCode: this.state.roomCode });
   }
 
@@ -664,27 +896,36 @@ export class MultiplayerMatchController {
     });
   }
 
-  sendState(payload: Omit<MatchStatePacket, 't'>) {
+  sendState(payload: Omit<MatchStatePacket, 't' | 'seq' | 'phase'>) {
     if (!this.socket.connected || this.state.matchStatus !== 'running' || !this.state.roomCode) {
       return;
     }
     const now = Date.now();
     const minIntervalMs = 16; // ~60Hz uplink for responsive opponent sync during jumps/landing
+    const nextPayload = {
+      ...payload,
+      phase: 'running' as const,
+    };
     const prev = this.lastSentState;
     const smallDelta =
       prev &&
-      Math.abs(prev.normalizedY - payload.normalizedY) < 0.002 &&
-      Math.abs(prev.scroll - payload.scroll) < 0.5 &&
-      prev.gravityDir === payload.gravityDir &&
-      prev.alive === payload.alive;
+      Math.abs(prev.normalizedY - nextPayload.normalizedY) < 0.002 &&
+      Math.abs(prev.scroll - nextPayload.scroll) < 0.5 &&
+      prev.gravityDir === nextPayload.gravityDir &&
+      prev.alive === nextPayload.alive &&
+      prev.pose === nextPayload.pose &&
+      prev.flipLocked === nextPayload.flipLocked &&
+      prev.countdownLocked === nextPayload.countdownLocked;
     if (now - this.lastStateSentAt < minIntervalMs && smallDelta) {
       return;
     }
 
     this.lastStateSentAt = now;
-    this.lastSentState = payload;
+    this.lastSentState = nextPayload;
+    this.lastSentSeq += 1;
     this.socket.emit('match:state', {
-      ...payload,
+      ...nextPayload,
+      seq: this.lastSentSeq,
       t: now,
     });
   }
@@ -704,11 +945,22 @@ export class MultiplayerMatchController {
     this.emitState();
   }
 
+  cancelPendingAction() {
+    if (this.state.pendingAction === 'none') return;
+    const pendingAction = this.state.pendingAction;
+    this.debugLog('request.cancelled', { action: this.state.pendingAction });
+    this.resolvePendingRequest();
+    this.setState({
+      pendingAction: 'none',
+      errorMessage: null,
+      ...this.getPendingRollbackState(pendingAction),
+    });
+  }
+
   resetLobbyState() {
     this.clearCountdownTimer();
-    this.pendingCreate = null;
-    this.pendingJoin = null;
-    this.pendingQueueJoin = null;
+    this.clearPendingRequestTimer();
+    this.clearPendingPayloads();
     this.leaveQueueIfNeeded();
     this.leaveRoomIfNeeded();
     this.state = {
@@ -719,8 +971,7 @@ export class MultiplayerMatchController {
       localReady: false,
       opponentReady: false,
     };
-    this.lastSentState = null;
-    this.lastStateSentAt = 0;
+    this.resetOutgoingStateTracking();
     this.emitState();
     this.emitOpponentSnapshot(null);
   }

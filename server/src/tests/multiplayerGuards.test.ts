@@ -40,7 +40,10 @@ test('derivePreMatchState follows player and ready counts', () => {
 
 test('isValidMatchStatePayload validates runtime bounds', () => {
   const valid: MatchStatePacket = {
+    seq: 1,
     t: Date.now(),
+    phase: 'running',
+    pose: 'run',
     normalizedY: 0.5,
     gravityDir: 1,
     scroll: 120,
@@ -51,6 +54,8 @@ test('isValidMatchStatePayload validates runtime bounds', () => {
   assert.equal(isValidMatchStatePayload({ ...valid, normalizedY: 3 }), false);
   assert.equal(isValidMatchStatePayload({ ...valid, gravityDir: 0 as 1 }), false);
   assert.equal(isValidMatchStatePayload({ ...valid, scroll: -5 }), false);
+  assert.equal(isValidMatchStatePayload({ ...valid, seq: -1 }), false);
+  assert.equal(isValidMatchStatePayload({ ...valid, pose: 'slide' as 'run' }), false);
   assert.equal(isValidMatchStatePayload({ ...valid, score: Number.POSITIVE_INFINITY }), false);
 });
 

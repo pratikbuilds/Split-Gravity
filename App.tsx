@@ -401,11 +401,7 @@ function AppContent() {
       void AsyncStorage.setItem(SELECTED_CHARACTER_STORAGE_KEY, DEFAULT_CHARACTER_ID);
       void AsyncStorage.removeItem(SELECTED_CUSTOM_CHARACTER_STORAGE_KEY);
     }
-  }, [
-    selectedCharacterId,
-    selectedCustomCharacter,
-    walletSession.storedSession?.walletAddress,
-  ]);
+  }, [selectedCharacterId, selectedCustomCharacter, walletSession.storedSession?.walletAddress]);
 
   useEffect(() => {
     const unsubscribe = multiplayerController.subscribe((state) => {
@@ -429,14 +425,22 @@ function AppContent() {
   }, [multiplayerController, opponentSnapshotValue]);
 
   useEffect(() => {
-    preloadCharacters([
-      multiplayerState.localPlayer?.characterId,
-      multiplayerState.opponent?.characterId,
-    ]);
+    if (typeof __DEV__ === 'undefined' || !__DEV__) return;
+    console.info('[app] multiplayer.view', {
+      screen,
+      pendingAction: multiplayerState.pendingAction,
+      roomCode: multiplayerState.roomCode,
+      localPlayerId: multiplayerState.localPlayer?.playerId ?? null,
+      opponentPlayerId: multiplayerState.opponent?.playerId ?? null,
+      matchStatus: multiplayerState.matchStatus,
+    });
   }, [
-    multiplayerState.localPlayer?.characterId,
-    multiplayerState.opponent?.characterId,
-    preloadCharacters,
+    screen,
+    multiplayerState.pendingAction,
+    multiplayerState.roomCode,
+    multiplayerState.localPlayer?.playerId,
+    multiplayerState.opponent?.playerId,
+    multiplayerState.matchStatus,
   ]);
 
   // Preload game assets as soon as both players are in lobby so they're ready when countdown starts
@@ -587,7 +591,10 @@ function AppContent() {
 
   useEffect(() => {
     if (!mode.startsWith('multi_')) return;
-    if (multiplayerState.matchStatus !== 'countdown' && multiplayerState.matchStatus !== 'running') {
+    if (
+      multiplayerState.matchStatus !== 'countdown' &&
+      multiplayerState.matchStatus !== 'running'
+    ) {
       return;
     }
     if (!hasMultiplayerPair) return;
@@ -893,6 +900,10 @@ function AppContent() {
     multiplayerController.leavePaidQueue();
   }, [multiplayerController]);
 
+  const handleCancelPendingMultiplayerAction = useCallback(() => {
+    multiplayerController.cancelPendingAction();
+  }, [multiplayerController]);
+
   const openSingleModeSelect = useCallback(() => {
     setScreen('single_mode_select');
   }, []);
@@ -1079,6 +1090,7 @@ function AppContent() {
       scroll: number;
       alive: boolean;
       score: number;
+      pose: 'idle' | 'run' | 'jump' | 'fall';
       frameIndex: number;
       velocityY: number;
       flipLocked: 0 | 1;
@@ -1188,12 +1200,14 @@ function AppContent() {
 
         {screen === 'lobby' ? (
           <LobbyScreen
+            key={multiplayerState.roomCode ?? 'room-entry'}
             state={multiplayerState}
             onBack={handleExitToHome}
             onCreateRoom={handleCreateRoom}
             onJoinRoom={handleJoinRoom}
             onJoinQueue={handleJoinPaidQueue}
             onLeaveQueue={handleLeavePaidQueue}
+            onCancelPending={handleCancelPendingMultiplayerAction}
             onReady={handleReadyRoom}
             mode={mode}
             paidSession={pendingPaidSession}
@@ -1301,7 +1315,9 @@ function AppContent() {
                       <Text style={styles.gameOverSubtitle}>Distance</Text>
                       <View style={styles.scoreCardRow}>
                         <Text style={styles.scoreCardLabel}>
-                          {multiplayerResult.winnerPlayerId === localPlayerId ? 'You' : multiplayerState.opponent?.nickname ?? 'Winner'}
+                          {multiplayerResult.winnerPlayerId === localPlayerId
+                            ? 'You'
+                            : (multiplayerState.opponent?.nickname ?? 'Winner')}
                         </Text>
                         <Text style={styles.scoreCardValue}>
                           {multiplayerResult.winnerScore != null
@@ -1311,7 +1327,9 @@ function AppContent() {
                       </View>
                       <View style={styles.scoreCardRow}>
                         <Text style={styles.scoreCardLabel}>
-                          {multiplayerResult.loserPlayerId === localPlayerId ? 'You' : multiplayerState.opponent?.nickname ?? 'Opponent'}
+                          {multiplayerResult.loserPlayerId === localPlayerId
+                            ? 'You'
+                            : (multiplayerState.opponent?.nickname ?? 'Opponent')}
                         </Text>
                         <Text style={styles.scoreCardValue}>
                           {multiplayerResult.loserScore != null

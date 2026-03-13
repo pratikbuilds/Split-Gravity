@@ -194,14 +194,14 @@ export const CHARACTER_DEFINITIONS_BY_ID: Record<PresetCharacterId, CharacterDef
   );
 
 export const getCharacterDefinition = (characterId: PresetCharacterId): CharacterDefinition => {
-  return CHARACTER_DEFINITIONS_BY_ID[characterId];
+  return CHARACTER_DEFINITIONS_BY_ID[characterId] ?? CHARACTER_DEFINITIONS_BY_ID[DEFAULT_CHARACTER_ID];
 };
 
 export const getCharacterDefinitionOrDefault = (
   characterId: CharacterId | null | undefined | string
 ): CharacterDefinition => {
   if (isPresetCharacterId(characterId)) {
-    return CHARACTER_DEFINITIONS_BY_ID[characterId];
+    return CHARACTER_DEFINITIONS_BY_ID[characterId] ?? CHARACTER_DEFINITIONS_BY_ID[DEFAULT_CHARACTER_ID];
   }
   return CHARACTER_DEFINITIONS_BY_ID[DEFAULT_CHARACTER_ID];
 };

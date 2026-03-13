@@ -17,6 +17,7 @@ interface LobbyScreenProps {
   onJoinRoom: (roomCode: string, nickname: string) => void;
   onJoinQueue: (nickname: string) => void;
   onLeaveQueue: () => void;
+  onCancelPending: () => void;
   onReady: () => void;
 }
 
@@ -29,6 +30,7 @@ export const LobbyScreen = ({
   onJoinRoom,
   onJoinQueue,
   onLeaveQueue,
+  onCancelPending,
   onReady,
 }: LobbyScreenProps) => {
   const [nickname, setNickname] = useState('');
@@ -55,6 +57,7 @@ export const LobbyScreen = ({
     state.pendingAction !== 'queueing' &&
     state.pendingAction !== 'leaving_queue' &&
     state.queueStatus !== 'queued';
+  const canCancelPending = !state.roomCode && state.pendingAction !== 'none';
   const localCharacterName = state.localPlayer
     ? getCharacterDefinitionOrDefault(state.localPlayer.characterId).displayName
     : '-';
@@ -274,6 +277,18 @@ export const LobbyScreen = ({
 
         {state.pendingAction === 'creating_room' && (
           <Text className="mt-6 text-sm font-bold uppercase tracking-wider text-orange-400">Creating room...</Text>
+        )}
+        {canCancelPending && (
+          <Pressable
+            onPress={onCancelPending}
+            className="mt-3 rounded-full border border-white/10 bg-white/5 px-5 py-2 active:bg-white/10">
+            <Text className="text-xs font-bold uppercase tracking-wider text-slate-300">Cancel</Text>
+          </Pressable>
+        )}
+        {canCancelPending && !state.connected && (
+          <Text className="mt-3 text-center text-xs font-medium text-slate-500">
+            Waiting for the multiplayer server connection...
+          </Text>
         )}
         {state.errorMessage && <Text className="mt-6 text-sm font-bold text-red-400 bg-red-950/50 px-4 py-2 rounded-lg border border-red-500/30">{state.errorMessage}</Text>}
         <Text className="mt-8 text-xs font-medium text-slate-600">Server: {state.serverUrl}</Text>

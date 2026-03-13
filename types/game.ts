@@ -28,10 +28,14 @@ export type GameMode =
   | 'multi_paid_queue';
 
 export type MatchStatus = 'idle' | 'lobby' | 'countdown' | 'running' | 'result';
+export type OpponentPose = 'idle' | 'run' | 'jump' | 'fall';
 
 export interface OpponentSnapshot {
   playerId: string;
   nickname: string;
+  phase: Exclude<MatchStatus, 'idle'>;
+  pose: OpponentPose;
+  seq: number;
   normalizedY: number;
   gravityDir: 1 | -1;
   scroll: number;

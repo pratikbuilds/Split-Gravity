@@ -18,6 +18,14 @@ export interface ServerPlayer extends PlayerSession {
   paymentIntentId?: string;
 }
 
+export const resetPlayerRoundState = (
+  player: Pick<ServerPlayer, 'alive' | 'lastState' | 'lastInputAt'>
+) => {
+  player.alive = true;
+  player.lastState = undefined;
+  player.lastInputAt = undefined;
+};
+
 export interface Room {
   roomCode: string;
   state: MatchState;
@@ -70,6 +78,7 @@ export const snapshotRoom = (room: Room): RoomSnapshot => ({
   roomKind: room.roomKind,
   tokenId: room.tokenId ?? null,
   entryFeeTierId: room.entryFeeTierId ?? null,
+  startedAt: room.startedAt ?? null,
   players: [...room.players.values()].map((player) => ({
     playerId: player.playerId,
     clientId: player.clientId,

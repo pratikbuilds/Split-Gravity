@@ -2,6 +2,8 @@ import type { CharacterId } from './characters';
 
 export type MatchState = 'ROOM_OPEN' | 'ROOM_FULL' | 'READY' | 'COUNTDOWN' | 'RUNNING' | 'ENDED';
 export type MatchRoomKind = 'casual' | 'paid_private' | 'paid_queue';
+export type MatchPhase = 'lobby' | 'countdown' | 'running' | 'result';
+export type CharacterPose = 'idle' | 'run' | 'jump' | 'fall';
 
 export type ConnectionState = 'connected' | 'reconnecting' | 'forfeit_pending';
 
@@ -25,13 +27,17 @@ export interface RoomSnapshot {
   roomKind?: MatchRoomKind;
   tokenId?: string | null;
   entryFeeTierId?: string | null;
+  startedAt?: number | null;
   players: PlayerSession[];
   readyPlayerIds: string[];
   fundedPlayerIds?: string[];
 }
 
 export interface MatchStatePacket {
+  seq: number;
   t: number;
+  phase: MatchPhase;
+  pose: CharacterPose;
   normalizedY: number;
   gravityDir: 1 | -1;
   scroll: number;

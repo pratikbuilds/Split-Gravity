@@ -1,4 +1,9 @@
-import type { MatchState, MatchStatePacket } from './shared/multiplayer-contracts';
+import type {
+  CharacterPose,
+  MatchPhase,
+  MatchState,
+  MatchStatePacket,
+} from './shared/multiplayer-contracts';
 
 export const MAX_CLIENT_ID_LENGTH = 128;
 export const MAX_NICKNAME_LENGTH = 24;
@@ -13,7 +18,11 @@ export const sanitizeNickname = (nickname: string, fallback: string) => {
 };
 
 export const isValidClientId = (clientId: unknown): clientId is string => {
-  return typeof clientId === 'string' && clientId.trim().length > 0 && clientId.length <= MAX_CLIENT_ID_LENGTH;
+  return (
+    typeof clientId === 'string' &&
+    clientId.trim().length > 0 &&
+    clientId.length <= MAX_CLIENT_ID_LENGTH
+  );
 };
 
 export const derivePreMatchState = (playerCount: number, readyCount: number): MatchState => {
@@ -25,8 +34,16 @@ export const derivePreMatchState = (playerCount: number, readyCount: number): Ma
 
 export const isValidMatchStatePayload = (payload: MatchStatePacket) => {
   const hasFinite = (value: number) => Number.isFinite(value);
+  const isPhase = (value: MatchPhase) =>
+    value === 'lobby' || value === 'countdown' || value === 'running' || value === 'result';
+  const isPose = (value: CharacterPose) =>
+    value === 'idle' || value === 'run' || value === 'jump' || value === 'fall';
+  if (!Number.isInteger(payload.seq) || payload.seq < 0) return false;
   if (!hasFinite(payload.t) || payload.t <= 0) return false;
-  if (!hasFinite(payload.normalizedY) || payload.normalizedY < -1 || payload.normalizedY > 2) return false;
+  if (!isPhase(payload.phase)) return false;
+  if (!isPose(payload.pose)) return false;
+  if (!hasFinite(payload.normalizedY) || payload.normalizedY < -1 || payload.normalizedY > 2)
+    return false;
   if (payload.gravityDir !== 1 && payload.gravityDir !== -1) return false;
   if (!hasFinite(payload.scroll) || payload.scroll < 0 || payload.scroll > MAX_SCROLL) return false;
   if (typeof payload.alive !== 'boolean') return false;

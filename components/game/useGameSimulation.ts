@@ -22,6 +22,7 @@ import {
   EDGE_CONTACT_MARGIN,
   groundHeight,
 } from './constants';
+import { resolvePoseFromPhysics } from './multiplayerPose';
 import type { SimulationRefs } from './types';
 
 const resolveGroundSnapY = ({
@@ -126,6 +127,7 @@ interface UseGameSimulationArgs {
     scroll: number;
     alive: boolean;
     score: number;
+    pose: 'idle' | 'run' | 'jump' | 'fall';
     frameIndex: number;
     velocityY: number;
     flipLocked: 0 | 1;
@@ -339,6 +341,11 @@ export const useGameSimulation = ({
         scroll: refs.totalScroll.value,
         alive: refs.dying.value === 0 && refs.gameOver.value === 0,
         score: Math.floor(refs.totalScroll.value),
+        pose: resolvePoseFromPhysics(
+          refs.countdownLocked.value,
+          refs.flipLockedUntilLanding.value,
+          refs.velocityY.value
+        ),
         frameIndex: refs.frameIndex.value,
         velocityY: refs.velocityY.value,
         flipLocked: (refs.flipLockedUntilLanding.value === 1 ? 1 : 0) as 0 | 1,

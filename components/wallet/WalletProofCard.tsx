@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState, memo } from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
-import { useMobileWallet } from '@wallet-ui/react-native-web3js';
+import { useWallet } from '../../hooks/useWallet';
 
 import { getWalletAddress, getWalletPublicKey } from '../../utils/wallet/account';
 import { formatWalletError, isUserRejectedWalletError } from '../../utils/wallet/errors';
@@ -22,7 +22,7 @@ type FeedbackState = {
 const CARD_MAX_WIDTH = 360;
 
 function WalletProofCardComponent() {
-  const { account, connect, connection, disconnect, signTransaction } = useMobileWallet();
+  const { account, connect, connection, disconnect, signTransaction } = useWallet();
   const [feedback, setFeedback] = useState<FeedbackState>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
 
