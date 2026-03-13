@@ -148,7 +148,7 @@ export class MultiplayerMatchController {
       normalizedY: opponentGravityDir === -1 ? 0 : 1,
       gravityDir: opponentGravityDir,
       scroll: phase === 'running' ? (existing?.scroll ?? 0) : 0,
-      charX: existing?.playerId === opponent.playerId ? existing.charX : 0,
+      worldX: existing?.playerId === opponent.playerId ? existing.worldX : 0,
       alive: phase === 'result' ? Boolean(opponent.alive) : true,
       score: phase === 'running' ? (existing?.score ?? 0) : 0,
       t: options?.t ?? Date.now(),
@@ -461,7 +461,7 @@ export class MultiplayerMatchController {
         normalizedY: state.normalizedY,
         gravityDir: state.gravityDir,
         scroll: state.scroll,
-        charX: state.charX,
+        worldX: state.worldX,
         alive: state.alive,
         score: state.score,
         t: state.t,
@@ -949,7 +949,7 @@ export class MultiplayerMatchController {
       prev &&
       Math.abs(prev.normalizedY - nextPayload.normalizedY) < 0.002 &&
       Math.abs(prev.scroll - nextPayload.scroll) < 0.5 &&
-      Math.abs(prev.charX - nextPayload.charX) < 0.5 &&
+      Math.abs(prev.worldX - nextPayload.worldX) < 0.5 &&
       prev.gravityDir === nextPayload.gravityDir &&
       prev.alive === nextPayload.alive &&
       prev.pose === nextPayload.pose &&

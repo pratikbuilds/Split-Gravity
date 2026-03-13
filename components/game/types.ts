@@ -39,7 +39,7 @@ export type GameCanvasProps = {
     normalizedY: number;
     gravityDir: GravityDirection;
     scroll: number;
-    charX: number;
+    worldX: number;
     alive: boolean;
     score: number;
     pose: OpponentPose;

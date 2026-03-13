@@ -15,7 +15,7 @@ test('resetPlayerRoundState clears stale round state before a new match', () => 
       normalizedY: 1.4,
       gravityDir: 1,
       scroll: 420,
-      charX: 32,
+      worldX: 452,
       alive: false,
       score: 420,
       frameIndex: 7,

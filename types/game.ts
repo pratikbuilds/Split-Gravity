@@ -39,7 +39,7 @@ export interface OpponentSnapshot {
   normalizedY: number;
   gravityDir: 1 | -1;
   scroll: number;
-  charX: number;
+  worldX: number;
   alive: boolean;
   score: number;
   t: number;

@@ -1088,7 +1088,7 @@ function AppContent() {
       normalizedY: number;
       gravityDir: 1 | -1;
       scroll: number;
-      charX: number;
+      worldX: number;
       alive: boolean;
       score: number;
       pose: 'idle' | 'run' | 'jump' | 'fall';

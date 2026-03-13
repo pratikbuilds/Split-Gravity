@@ -128,7 +128,7 @@ interface UseGameSimulationArgs {
     normalizedY: number;
     gravityDir: 1 | -1;
     scroll: number;
-    charX: number;
+    worldX: number;
     alive: boolean;
     score: number;
     pose: 'idle' | 'run' | 'jump' | 'fall';
@@ -171,7 +171,7 @@ export const useGameSimulation = ({
         normalizedY,
         gravityDir: refs.gravityDirection.value === -1 ? -1 : 1,
         scroll: refs.raceProgress.value,
-        charX: refs.charX.value,
+        worldX: refs.totalScroll.value + refs.charX.value,
         alive: false,
         score: Math.floor(refs.raceProgress.value),
         pose: 'fall',
@@ -389,7 +389,7 @@ export const useGameSimulation = ({
         normalizedY,
         gravityDir: refs.gravityDirection.value === -1 ? -1 : 1,
         scroll: refs.raceProgress.value,
-        charX: refs.charX.value,
+        worldX: refs.totalScroll.value + refs.charX.value,
         alive: refs.dying.value === 0 && refs.gameOver.value === 0,
         score: Math.floor(refs.raceProgress.value),
         pose: resolvePoseFromPhysics(

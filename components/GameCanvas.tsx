@@ -14,6 +14,7 @@ import type { SharedValue } from 'react-native-reanimated';
 import { useAnimatedReaction, useFrameCallback, useSharedValue } from 'react-native-reanimated';
 import { Atlas, Canvas, Group, Line, Picture, Rect } from '@shopify/react-native-skia';
 import { scheduleOnRN } from 'react-native-worklets';
+import { isGrounded, scanCollisionSurfaces } from '../shared/game/physics';
 import { FLAT_ZONE_LENGTH, type GameAudioEvent, type OpponentSnapshot } from '../types/game';
 import {
   CHAR_SCALE,
@@ -23,8 +24,11 @@ import {
   ENABLE_COLLIDER_DEBUG_UI,
   FLIP_ARC_DECAY,
   GRAVITY,
+  GROUNDED_EPSILON,
+  LANDING_MIN_OVERLAP,
   OPPONENT_X_FACTOR,
   RUN_SPEED,
+  SUPPORT_MIN_OVERLAP,
   groundHeight,
 } from './game/constants';
 import { useGameGestures } from './game/useGameGestures';
@@ -48,6 +52,71 @@ const resolveCountdownDigit = (remainingMs: number): 5 | 4 | 3 | 2 | 1 | null =>
   if (remainingMs > 1_000) return 2;
   if (remainingMs > 0) return 1;
   return null;
+};
+
+const resolveRemoteGroundSnapY = ({
+  gravityDir,
+  inFlatZone,
+  posY,
+  charH,
+  groundY,
+  flatTopY,
+  rects,
+  footLeft,
+  footRight,
+}: {
+  gravityDir: 1 | -1;
+  inFlatZone: boolean;
+  posY: number;
+  charH: number;
+  groundY: number;
+  flatTopY: number;
+  rects: number[];
+  footLeft: number;
+  footRight: number;
+}) => {
+  'worklet';
+  let bestTarget: number | null = null;
+  let bestDelta = Number.POSITIVE_INFINITY;
+
+  const tryTarget = (targetY: number) => {
+    const delta = Math.abs(posY - targetY);
+    if (delta <= GROUNDED_EPSILON && delta < bestDelta) {
+      bestDelta = delta;
+      bestTarget = targetY;
+    }
+  };
+
+  if (gravityDir === 1) {
+    if (inFlatZone) {
+      tryTarget(groundY - charH);
+    }
+    for (let i = 0; i < rects.length; i += 4) {
+      const px = rects[i];
+      const py = rects[i + 1];
+      const pw = rects[i + 2];
+      const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
+      if (overlap >= SUPPORT_MIN_OVERLAP) {
+        tryTarget(py - charH);
+      }
+    }
+    return bestTarget;
+  }
+
+  if (inFlatZone) {
+    tryTarget(flatTopY);
+  }
+  for (let i = 0; i < rects.length; i += 4) {
+    const px = rects[i];
+    const py = rects[i + 1];
+    const pw = rects[i + 2];
+    const ph = rects[i + 3];
+    const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
+    if (overlap >= SUPPORT_MIN_OVERLAP) {
+      tryTarget(py + ph);
+    }
+  }
+  return bestTarget;
 };
 
 type DebugOverlayState = {
@@ -707,12 +776,9 @@ export const GameCanvas = ({
       const lagSec = lagMs / 1000;
       const laneSpan = Math.max(1, height - 2 * groundHeight - charSize);
       const targetY = groundHeight + snapshot.normalizedY * laneSpan;
-      const predictedScreenX =
-        snapshot.scroll +
-        RUN_SPEED * lagSec +
-        snapshot.charX +
-        (snapshot.velocityX ?? 0) * lagSec -
-        refs.totalScroll.value;
+      const predictedWorldX =
+        snapshot.worldX + (RUN_SPEED + (snapshot.velocityX ?? 0)) * lagSec;
+      const predictedScreenX = predictedWorldX - refs.totalScroll.value;
       const predictedVelocityY =
         snapshot.velocityY + snapshot.gravityDir * GRAVITY * lagSec;
       const predictedY =
@@ -802,6 +868,8 @@ export const GameCanvas = ({
     const rawDt = frameInfo.timeSincePreviousFrame ?? 16;
     const dtSec = rawDt / 1000;
     const horizontalDecay = Math.pow(FLIP_ARC_DECAY, rawDt / 16);
+    const prevTop = opponentPosY.value;
+    const prevBottom = prevTop + charSize;
     opponentPosX.value += opponentVelocityX.value * dtSec;
     opponentVelocityX.value *= horizontalDecay;
     if (Math.abs(opponentVelocityX.value) < 1) {
@@ -809,6 +877,71 @@ export const GameCanvas = ({
     }
     opponentVelocityY.value += opponentGravity.value * GRAVITY * dtSec;
     opponentPosY.value += opponentVelocityY.value * dtSec;
+
+    const opponentWorldX = refs.totalScroll.value + opponentPosX.value;
+    const inFlatZone = opponentWorldX < FLAT_ZONE_LENGTH;
+    const footLeft = opponentWorldX + EDGE_CONTACT_MARGIN;
+    const footRight = opponentWorldX + charSize - EDGE_CONTACT_MARGIN;
+    const charBottom = opponentPosY.value + charSize;
+    const { nearestDownSurface, nearestUpSurface } = scanCollisionSurfaces({
+      rects: refs.platformRects.value,
+      footLeft,
+      footRight,
+      prevTop,
+      prevBottom,
+      charTop: opponentPosY.value,
+      charBottom,
+      landingMinOverlap: LANDING_MIN_OVERLAP,
+      groundedEpsilon: GROUNDED_EPSILON,
+    });
+
+    if (opponentGravity.value === 1 && opponentVelocityY.value >= 0) {
+      if (nearestDownSurface < Number.POSITIVE_INFINITY) {
+        opponentPosY.value = nearestDownSurface - charSize;
+        opponentVelocityY.value = 0;
+      } else if (inFlatZone && charBottom >= stableGroundY) {
+        opponentPosY.value = stableGroundY - charSize;
+        opponentVelocityY.value = 0;
+      }
+    } else if (opponentGravity.value === -1 && opponentVelocityY.value <= 0) {
+      if (nearestUpSurface > Number.NEGATIVE_INFINITY) {
+        opponentPosY.value = nearestUpSurface;
+        opponentVelocityY.value = 0;
+      } else if (inFlatZone && opponentPosY.value <= groundHeight) {
+        opponentPosY.value = groundHeight;
+        opponentVelocityY.value = 0;
+      }
+    }
+
+    const grounded = isGrounded({
+      gravityDir: opponentGravity.value === -1 ? -1 : 1,
+      inFlatZone,
+      posY: opponentPosY.value,
+      charH: charSize,
+      groundY: stableGroundY,
+      flatTopY: groundHeight,
+      rects: refs.platformRects.value,
+      footLeft,
+      footRight,
+      supportMinOverlap: SUPPORT_MIN_OVERLAP,
+      groundedEpsilon: GROUNDED_EPSILON,
+    });
+    if (grounded) {
+      const snapY = resolveRemoteGroundSnapY({
+        gravityDir: opponentGravity.value === -1 ? -1 : 1,
+        inFlatZone,
+        posY: opponentPosY.value,
+        charH: charSize,
+        groundY: stableGroundY,
+        flatTopY: groundHeight,
+        rects: refs.platformRects.value,
+        footLeft,
+        footRight,
+      });
+      if (snapY !== null) {
+        opponentPosY.value = snapY;
+      }
+    }
 
     if (opponentDying.value === 1) {
       const offscreenDown = opponentPosY.value > height + charSize;

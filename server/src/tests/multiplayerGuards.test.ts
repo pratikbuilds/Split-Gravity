@@ -47,7 +47,7 @@ test('isValidMatchStatePayload validates runtime bounds', () => {
     normalizedY: 0.5,
     gravityDir: 1,
     scroll: 120,
-    charX: 180,
+    worldX: 300,
     alive: true,
     score: 120,
     velocityX: 0,
@@ -56,7 +56,7 @@ test('isValidMatchStatePayload validates runtime bounds', () => {
   assert.equal(isValidMatchStatePayload({ ...valid, normalizedY: 3 }), false);
   assert.equal(isValidMatchStatePayload({ ...valid, gravityDir: 0 as 1 }), false);
   assert.equal(isValidMatchStatePayload({ ...valid, scroll: -5 }), false);
-  assert.equal(isValidMatchStatePayload({ ...valid, charX: Number.POSITIVE_INFINITY }), false);
+  assert.equal(isValidMatchStatePayload({ ...valid, worldX: Number.POSITIVE_INFINITY }), false);
   assert.equal(isValidMatchStatePayload({ ...valid, seq: -1 }), false);
   assert.equal(isValidMatchStatePayload({ ...valid, pose: 'slide' as 'run' }), false);
   assert.equal(isValidMatchStatePayload({ ...valid, score: Number.POSITIVE_INFINITY }), false);
