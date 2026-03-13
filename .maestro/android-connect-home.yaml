@@ -1,0 +1,5 @@
+appId: com.pratik.myexpoapp
+---
+- launchApp
+- tapOn: "http://10.0.2.2:8081"
+- assertVisible: "MULTIPLAYER"

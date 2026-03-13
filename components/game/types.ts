@@ -61,6 +61,7 @@ export interface SimulationRefs {
   gameOver: SharedValue<number>;
   dying: SharedValue<number>;
   deathScore: SharedValue<number>;
+  raceProgress: SharedValue<number>;
   velocityX: SharedValue<number>;
   totalScroll: SharedValue<number>;
   initialized: SharedValue<number>;

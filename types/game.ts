@@ -74,6 +74,8 @@ export interface LevelGeneratorConfig {
   screenWidth: number;
   /** When set, shuffles section order deterministically for level variety (e.g. paid matches) */
   sectionOrderSeed?: number;
+  /** Temporary testing mode: preserve section platforms while removing pits from the lane. */
+  forceContinuousCorridor?: boolean;
 }
 
 // Reachability constants (tune from physics)

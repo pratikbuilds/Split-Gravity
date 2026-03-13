@@ -1,0 +1,5 @@
+appId: com.pratik.myexpoapp
+---
+- launchApp
+- tapOn:
+    point: "50%,76%"

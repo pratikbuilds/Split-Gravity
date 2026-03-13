@@ -21,7 +21,6 @@ import {
   DEATH_MARGIN_FRACTION,
   EDGE_CONTACT_MARGIN,
   ENABLE_COLLIDER_DEBUG_UI,
-  OPPONENT_LERP_SPEED,
   OPPONENT_X_FACTOR,
   groundHeight,
 } from './game/constants';
@@ -36,6 +35,8 @@ import { COUNTDOWN_DIGIT_ASSETS } from './game/worldAssetSources';
 const SCORE_DISPLAY_BUCKET = 10;
 const OPPONENT_SCORE_DISPLAY_BUCKET = 10;
 const DEBUG_OVERLAY_UPDATE_MS = 80;
+const OPPONENT_PATH_CORRECTION_SPEED = 18;
+const OPPONENT_MAX_VISUAL_SNAP_DISTANCE = 96;
 const resolveCountdownDigit = (remainingMs: number): 5 | 4 | 3 | 2 | 1 | null => {
   if (remainingMs > 4_000) return 5;
   if (remainingMs > 3_000) return 4;
@@ -314,6 +315,7 @@ export const GameCanvas = ({
   const gameOver = useSharedValue(0);
   const dying = useSharedValue(0);
   const deathScore = useSharedValue(0);
+  const raceProgress = useSharedValue(0);
   const velocityX = useSharedValue(0);
   const totalScroll = useSharedValue(0);
   const initialized = useSharedValue(0);
@@ -332,6 +334,9 @@ export const GameCanvas = ({
   const opponentVelocityY = useSharedValue(0);
   const opponentFlipLocked = useSharedValue(0);
   const opponentCountdownLocked = useSharedValue(0);
+  const opponentDying = useSharedValue(0);
+  const assetsReady = useSharedValue(0);
+  const multiplayerCountdownStartAtValue = useSharedValue(0);
 
   const refs = useMemo(
     () => ({
@@ -345,6 +350,7 @@ export const GameCanvas = ({
       gameOver,
       dying,
       deathScore,
+      raceProgress,
       velocityX,
       totalScroll,
       initialized,
@@ -370,6 +376,7 @@ export const GameCanvas = ({
       elapsedMs,
       frameIndex,
       gameOver,
+      raceProgress,
       flipLockedUntilLanding,
       gravityDirection,
       groundY,
@@ -419,6 +426,7 @@ export const GameCanvas = ({
   const { scoreValue, platforms } = useScoreAndChunks({
     restartKey,
     levelSeed,
+    forceContinuousCorridor: Boolean(opponentCharacterId),
     width,
     height,
     groundY: stableGroundY,
@@ -473,6 +481,14 @@ export const GameCanvas = ({
   });
 
   useEffect(() => {
+    assetsReady.value = worldAssetsReady ? 1 : 0;
+  }, [assetsReady, worldAssetsReady]);
+
+  useEffect(() => {
+    multiplayerCountdownStartAtValue.value = effectiveMultiplayerCountdownStartAt ?? 0;
+  }, [effectiveMultiplayerCountdownStartAt, multiplayerCountdownStartAtValue]);
+
+  useEffect(() => {
     void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
   }, []);
 
@@ -490,6 +506,7 @@ export const GameCanvas = ({
     opponentVelocityY.value = 0;
     opponentFlipLocked.value = 0;
     opponentCountdownLocked.value = 1;
+    opponentDying.value = 0;
   }, [
     charSize,
     initialGravityDirection,
@@ -504,6 +521,7 @@ export const GameCanvas = ({
     opponentPoseCode,
     opponentTargetY,
     opponentVelocityY,
+    opponentDying,
     restartKey,
     stableGroundY,
   ]);
@@ -534,20 +552,23 @@ export const GameCanvas = ({
     };
 
     if (effectiveMultiplayerCountdownStartAt != null) {
+      const unlockDelay = Math.max(0, effectiveMultiplayerCountdownStartAt - Date.now());
       const syncCountdown = () => {
         const remainingMs = effectiveMultiplayerCountdownStartAt - Date.now();
         const digit = resolveCountdownDigit(remainingMs);
         applyCountdownDigit(digit);
-        if (remainingMs <= 0) {
-          tryUnlock();
-          return true;
-        }
-        return false;
+        return remainingMs <= 0;
       };
 
       if (syncCountdown()) {
+        tryUnlock();
         return;
       }
+
+      const unlockTimer = setTimeout(() => {
+        applyCountdownDigit(null);
+        tryUnlock();
+      }, unlockDelay);
 
       const timer = setInterval(() => {
         if (syncCountdown()) {
@@ -557,6 +578,7 @@ export const GameCanvas = ({
 
       return () => {
         clearInterval(timer);
+        clearTimeout(unlockTimer);
       };
     }
 
@@ -609,6 +631,17 @@ export const GameCanvas = ({
     worldAssetsReady,
   ]);
 
+  useFrameCallback(() => {
+    'worklet';
+    const startAt = multiplayerCountdownStartAtValue.value;
+    if (startAt <= 0) return;
+    if (assetsReady.value !== 1) return;
+    if (countdownLocked.value === 0 && refs.initialized.value === 1) return;
+    if (Date.now() < startAt) return;
+    countdownLocked.value = 0;
+    refs.initialized.value = 1;
+  });
+
   // Unlock when assets become ready after countdown has finished
   useEffect(() => {
     if (!worldAssetsReady) return;
@@ -646,28 +679,64 @@ export const GameCanvas = ({
     (snapshot) => {
       'worklet';
       if (!snapshot) {
-        opponentAlive.value = 0;
+        if (opponentDying.value === 0) {
+          opponentAlive.value = 0;
+        }
         return;
       }
       const laneSpan = Math.max(1, height - 2 * groundHeight - charSize);
-      opponentTargetY.value = groundHeight + snapshot.normalizedY * laneSpan;
+      const targetY = groundHeight + snapshot.normalizedY * laneSpan;
+      const runningPhase = snapshot.phase === 'running';
+      const wasCountdownLocked = opponentCountdownLocked.value === 1;
       opponentGravity.value = snapshot.gravityDir;
-      opponentAlive.value = snapshot.alive ? 1 : 0;
-      opponentPoseCode.value = resolvePoseCode(snapshot.pose);
+      opponentTargetY.value = targetY;
       opponentFrameIndex.value = snapshot.frameIndex;
-      opponentVelocityY.value = snapshot.velocityY;
       opponentFlipLocked.value = snapshot.flipLocked;
-      opponentCountdownLocked.value = snapshot.phase === 'running' ? snapshot.countdownLocked : 1;
+      opponentCountdownLocked.value = runningPhase ? snapshot.countdownLocked : 1;
+
+      if (!runningPhase) {
+        opponentAlive.value = 1;
+        opponentDying.value = 0;
+        opponentPosY.value = targetY;
+        opponentVelocityY.value = 0;
+        opponentPoseCode.value = OPPONENT_POSE_IDLE;
+        return;
+      }
+
+      if (snapshot.alive) {
+        const shouldSnapToTarget =
+          opponentDying.value === 1 ||
+          wasCountdownLocked ||
+          Math.abs(targetY - opponentPosY.value) > OPPONENT_MAX_VISUAL_SNAP_DISTANCE;
+        if (shouldSnapToTarget) {
+          opponentPosY.value = targetY;
+        }
+        opponentAlive.value = 1;
+        opponentDying.value = 0;
+        opponentVelocityY.value = snapshot.velocityY;
+        opponentPoseCode.value = resolvePoseCode(snapshot.pose);
+        return;
+      }
+
+      if (opponentDying.value === 0) {
+        opponentPosY.value = targetY;
+      }
+      opponentAlive.value = 1;
+      opponentDying.value = 1;
+      opponentVelocityY.value = snapshot.velocityY;
+      opponentPoseCode.value = resolvePoseCode('fall');
     },
     [
       charSize,
       height,
       opponentAlive,
       opponentCountdownLocked,
+      opponentDying,
       opponentFlipLocked,
       opponentFrameIndex,
       opponentGravity,
       opponentPoseCode,
+      opponentPosY,
       opponentTargetY,
       opponentVelocityY,
       opponentSnapshotSignal,
@@ -677,9 +746,33 @@ export const GameCanvas = ({
   useFrameCallback((frameInfo) => {
     'worklet';
     if (opponentAlive.value !== 1) return;
+    if (opponentCountdownLocked.value === 1) {
+      opponentPosY.value = opponentTargetY.value;
+      return;
+    }
+
     const rawDt = frameInfo.timeSincePreviousFrame ?? 16;
-    const t = Math.min((rawDt / 1000) * OPPONENT_LERP_SPEED, 1);
-    opponentPosY.value += (opponentTargetY.value - opponentPosY.value) * t;
+    const correctionBlend = Math.min((rawDt / 1000) * OPPONENT_PATH_CORRECTION_SPEED, 1);
+    const deltaY = opponentTargetY.value - opponentPosY.value;
+    if (Math.abs(deltaY) > OPPONENT_MAX_VISUAL_SNAP_DISTANCE) {
+      opponentPosY.value = opponentTargetY.value;
+    } else if (Math.abs(deltaY) <= 0.5) {
+      opponentPosY.value = opponentTargetY.value;
+    } else {
+      opponentPosY.value += deltaY * correctionBlend;
+    }
+
+    if (opponentDying.value === 1) {
+      const offscreenDown = opponentPosY.value > height + charSize;
+      const offscreenUp = opponentPosY.value + charSize < -charSize;
+      if (
+        (opponentGravity.value === 1 && offscreenDown) ||
+        (opponentGravity.value === -1 && offscreenUp)
+      ) {
+        opponentAlive.value = 0;
+        opponentDying.value = 0;
+      }
+    }
   });
 
   const opponentX = width * OPPONENT_X_FACTOR;

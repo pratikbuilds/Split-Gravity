@@ -26,6 +26,7 @@ interface UseGameGesturesArgs {
     | 'groundY'
     | 'gravityDirection'
     | 'flipLockedUntilLanding'
+    | 'raceProgress'
     | 'totalScroll'
     | 'charX'
     | 'simTimeMs'

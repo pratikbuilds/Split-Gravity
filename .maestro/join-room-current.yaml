@@ -1,0 +1,13 @@
+appId: com.pratik.myexpoapp
+---
+- tapOn: "Continue"
+- tapOn: "MULTIPLAYER"
+- tapOn:
+    text: "FREE.*Casual Room.*"
+- tapOn: "Enter your nickname"
+- inputText: "Bravo"
+- tapOn: "Join Room"
+- tapOn: "ROOM CODE"
+- inputText: "${ROOM_CODE}"
+- tapOn: "Join Room"
+- assertVisible: "ROOM CODE"

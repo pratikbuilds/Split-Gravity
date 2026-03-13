@@ -105,6 +105,11 @@ function buildSectionChunk(
   const platforms: Platform[] = section.platforms.map((p) =>
     instantiatePlatform(p, startX, groundY, tileSize, corridorBounds)
   );
+  if (config.forceContinuousCorridor) {
+    const sectionWidthPx = section.widthTiles * tileSize;
+    platforms.unshift(createPlatform(startX, 0, sectionWidthPx, tileSize * 2, 'top'));
+    platforms.unshift(createPlatform(startX, groundY, sectionWidthPx, tileSize * 2, 'bottom'));
+  }
   const widthPx = section.widthTiles * tileSize;
 
   return {

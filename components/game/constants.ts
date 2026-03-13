@@ -5,7 +5,7 @@ export const RUN_SPEED = 280;
 export const CHAR_SCALE = 1.5;
 export const CHAR_SIZE = 24;
 export const FRAME_INTERVAL_MS = 100;
-export const MULTIPLAYER_STATE_INTERVAL_MS = 16;
+export const MULTIPLAYER_STATE_INTERVAL_MS = 33;
 /** Vertical tolerance (px) to count as on a surface; slightly generous for reliable landing. */
 export const GROUNDED_EPSILON = 6;
 export const DEATH_MARGIN_FRACTION = 1.0;
@@ -20,6 +20,7 @@ export const SUPPORT_MIN_OVERLAP = 5;
 export const LANDING_MIN_OVERLAP = 4;
 export const BACKGROUND_SCROLL_FACTOR = 0.2;
 export const PLAYER_X_FACTOR = 0.2;
+export const PLAYER_LEFT_KILL_MARGIN = 24;
 export const OPPONENT_X_FACTOR = 0.34;
 export const OPPONENT_LERP_SPEED = 18;
 

@@ -1,0 +1,5 @@
+appId: com.pratik.myexpoapp
+---
+- launchApp
+- assertVisible: "SPLIT GRAVITY"
+- assertVisible: "MULTIPLAYER"

@@ -158,6 +158,29 @@ export class MultiplayerMatchController {
     };
   }
 
+  private isGameplayActive(now = Date.now()) {
+    if (this.state.matchStatus === 'running') return true;
+    return (
+      this.state.matchStatus === 'countdown' &&
+      this.state.countdownStartAt != null &&
+      now >= this.state.countdownStartAt
+    );
+  }
+
+  private promoteOpponentSnapshotToRunning(snapshot: OpponentSnapshot | null) {
+    if (!snapshot) return null;
+    if (snapshot.phase === 'running' && snapshot.countdownLocked === 0) {
+      return snapshot;
+    }
+    return {
+      ...snapshot,
+      phase: 'running',
+      pose: snapshot.alive ? (snapshot.pose === 'idle' ? 'run' : snapshot.pose) : 'fall',
+      countdownLocked: 0,
+      t: Math.max(snapshot.t, Date.now()),
+    };
+  }
+
   private resetOutgoingStateTracking() {
     this.lastSentState = null;
     this.lastStateSentAt = 0;
@@ -379,7 +402,12 @@ export class MultiplayerMatchController {
       const delay = Math.max(0, startAt - Date.now());
       this.countdownTimer = setTimeout(() => {
         this.countdownTimer = null;
-        this.setState({ matchStatus: 'running' });
+        const runningSnapshot = this.promoteOpponentSnapshotToRunning(this.state.opponentSnapshot);
+        this.setState({
+          matchStatus: 'running',
+          opponentSnapshot: runningSnapshot,
+        });
+        this.emitOpponentSnapshot(runningSnapshot);
       }, delay);
     });
 
@@ -387,14 +415,18 @@ export class MultiplayerMatchController {
       const opponent = this.state.opponent;
       const snapshot = this.state.opponentSnapshot;
       if (!opponent || opponent.playerId !== playerId || !snapshot || !snapshot.alive) return;
-      if (inputType !== 'flip' || snapshot.phase !== 'running') return;
+      if (inputType !== 'flip' || (snapshot.phase !== 'running' && !this.isGameplayActive())) {
+        return;
+      }
 
       const optimisticSnapshot: OpponentSnapshot = {
         ...snapshot,
+        phase: 'running',
         gravityDir: snapshot.gravityDir === 1 ? -1 : 1,
         pose: 'jump',
         velocityY: 0,
         flipLocked: 1,
+        countdownLocked: 0,
         t: Math.max(snapshot.t, t),
       };
 
@@ -889,7 +921,7 @@ export class MultiplayerMatchController {
   }
 
   sendInput(inputType: 'flip') {
-    if (!this.socket.connected || this.state.matchStatus !== 'running') return;
+    if (!this.socket.connected || !this.isGameplayActive()) return;
     this.socket.emit('match:input', {
       t: Date.now(),
       inputType,
@@ -897,11 +929,11 @@ export class MultiplayerMatchController {
   }
 
   sendState(payload: Omit<MatchStatePacket, 't' | 'seq' | 'phase'>) {
-    if (!this.socket.connected || this.state.matchStatus !== 'running' || !this.state.roomCode) {
+    if (!this.socket.connected || !this.isGameplayActive() || !this.state.roomCode) {
       return;
     }
     const now = Date.now();
-    const minIntervalMs = 16; // ~60Hz uplink for responsive opponent sync during jumps/landing
+    const minIntervalMs = 33; // 30Hz uplink keeps the local sim lighter while remote prediction fills gaps
     const nextPayload = {
       ...payload,
       phase: 'running' as const,
@@ -931,7 +963,7 @@ export class MultiplayerMatchController {
   }
 
   reportDeath(score: number) {
-    if (!this.socket.connected || this.state.matchStatus !== 'running') return;
+    if (!this.socket.connected || !this.isGameplayActive()) return;
     this.socket.emit('match:death', {
       t: Date.now(),
       score,

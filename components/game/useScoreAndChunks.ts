@@ -17,6 +17,7 @@ import type { GravityDirection, SimulationRefs } from './types';
 interface UseScoreAndChunksArgs {
   restartKey: number;
   levelSeed?: number;
+  forceContinuousCorridor?: boolean;
   width: number;
   height: number;
   groundY: number;
@@ -32,6 +33,7 @@ interface UseScoreAndChunksArgs {
     | 'gameOver'
     | 'dying'
     | 'deathScore'
+    | 'raceProgress'
     | 'simTimeMs'
     | 'elapsedMs'
     | 'frameIndex'
@@ -52,6 +54,7 @@ export interface UseScoreAndChunksResult {
 export const useScoreAndChunks = ({
   restartKey,
   levelSeed,
+  forceContinuousCorridor = false,
   width,
   height,
   groundY,
@@ -79,6 +82,7 @@ export const useScoreAndChunks = ({
     refs.gravityDirection.value = spawnGravity;
     refs.flipLockedUntilLanding.value = 0;
     refs.velocityX.value = 0;
+    refs.raceProgress.value = 0;
     refs.totalScroll.value = 0;
     refs.gameOver.value = 0;
     refs.dying.value = 0;
@@ -98,6 +102,7 @@ export const useScoreAndChunks = ({
       groundY,
       tileSize,
       screenWidth: width,
+      forceContinuousCorridor,
       ...(levelSeed != null && { sectionOrderSeed: levelSeed }),
     };
     const initialChunks = preGenerateLevelChunks(config);
@@ -108,6 +113,7 @@ export const useScoreAndChunks = ({
     initialGravityDirection,
     lastSpawnAt,
     levelSeed,
+    forceContinuousCorridor,
     refs,
     restartKey,
     scoreValue,
@@ -123,7 +129,7 @@ export const useScoreAndChunks = ({
   }, [platforms, refs.platformRects]);
 
   const spawnChunks = useCallback(() => {
-    const scroll = refs.totalScroll.value;
+    const scroll = refs.raceProgress.value;
     if (scroll < lastSpawnRef.current) return;
     lastSpawnRef.current = scroll + 200;
 
@@ -132,6 +138,7 @@ export const useScoreAndChunks = ({
       groundY,
       tileSize,
       screenWidth: width,
+      forceContinuousCorridor,
       ...(levelSeed != null && { sectionOrderSeed: levelSeed }),
     };
     const newChunks = generateLevelChunks(config, scroll, currentChunks);
@@ -141,14 +148,14 @@ export const useScoreAndChunks = ({
     if (chunksChanged) {
       setChunks(newChunks);
     }
-  }, [groundY, levelSeed, refs.totalScroll, width]);
+  }, [forceContinuousCorridor, groundY, levelSeed, refs.raceProgress, width]);
 
   // Score updates live on the UI thread via SharedValue — no React re-renders.
   // ScoreOverlay subscribes independently and only re-renders itself.
   useAnimatedReaction(
     () => {
       'worklet';
-      return refs.totalScroll.value;
+      return refs.raceProgress.value;
     },
     (scroll) => {
       'worklet';

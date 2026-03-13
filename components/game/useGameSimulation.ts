@@ -17,6 +17,8 @@ import {
   GROUNDED_EPSILON,
   LANDING_MIN_OVERLAP,
   MULTIPLAYER_STATE_INTERVAL_MS,
+  PLAYER_X_FACTOR,
+  PLAYER_LEFT_KILL_MARGIN,
   RUN_SPEED,
   SUPPORT_MIN_OVERLAP,
   EDGE_CONTACT_MARGIN,
@@ -109,6 +111,7 @@ interface UseGameSimulationArgs {
     | 'gameOver'
     | 'dying'
     | 'deathScore'
+    | 'raceProgress'
     | 'velocityX'
     | 'totalScroll'
     | 'initialized'
@@ -137,6 +140,7 @@ interface UseGameSimulationArgs {
 }
 
 export const useGameSimulation = ({
+  width,
   height,
   refs,
   triggerAudioEvent,
@@ -155,16 +159,42 @@ export const useGameSimulation = ({
     const { dt, stepCount, stepDt } = normalizeFrameStep(rawDt);
     const charH = CHAR_SIZE * CHAR_SCALE;
     const charW = CHAR_SIZE * CHAR_SCALE;
+    const laneSpan = Math.max(1, height - 2 * groundHeight - charH);
+    const anchorX = width * PLAYER_X_FACTOR;
+    const emitImmediateDeathState = () => {
+      'worklet';
+      if (!onLocalState) return;
+      const normalizedY = (refs.posY.value - groundHeight) / laneSpan;
+      scheduleOnRN(onLocalState, {
+        normalizedY,
+        gravityDir: refs.gravityDirection.value === -1 ? -1 : 1,
+        scroll: refs.raceProgress.value,
+        alive: false,
+        score: Math.floor(refs.raceProgress.value),
+        pose: 'fall',
+        frameIndex: refs.frameIndex.value,
+        velocityY: refs.velocityY.value,
+        flipLocked: (refs.flipLockedUntilLanding.value === 1 ? 1 : 0) as 0 | 1,
+        countdownLocked: 0 as 0 | 1,
+      });
+    };
+    const finishRunImmediately = (score: number) => {
+      'worklet';
+      refs.gameOver.value = 1;
+      scheduleOnRN(triggerAudioEvent, 'game_over');
+      scheduleOnRN(triggerGameOver, score);
+    };
     refs.simTimeMs.value += dt;
 
     for (let step = 0; step < stepCount; step += 1) {
-      const prevTotalScroll = refs.totalScroll.value;
+      const prevCameraScroll = refs.totalScroll.value;
       const gDir = refs.gravityDirection.value;
       const isDying = refs.dying.value === 1;
       const prevTop = refs.posY.value;
       const prevBottom = prevTop + charH;
 
       if (!isDying) {
+        refs.raceProgress.value += RUN_SPEED * (stepDt / 1000);
         refs.totalScroll.value += RUN_SPEED * (stepDt / 1000);
       }
 
@@ -174,7 +204,7 @@ export const useGameSimulation = ({
       let charWorldX = refs.totalScroll.value + refs.charX.value;
       const rects = refs.platformRects.value;
       let inFlatZone = charWorldX < FLAT_ZONE_LENGTH;
-      const prevLeft = prevTotalScroll + refs.charX.value;
+      const prevLeft = prevCameraScroll + refs.charX.value;
       const prevRight = prevLeft + charW;
       const charLeft = charWorldX;
       const charRight = charWorldX + charW;
@@ -194,7 +224,7 @@ export const useGameSimulation = ({
         groundedEpsilon: GROUNDED_EPSILON,
       });
       if (blockedLeft !== null) {
-        refs.totalScroll.value = blockedLeft - refs.charX.value;
+        refs.charX.value = blockedLeft - refs.totalScroll.value;
         refs.velocityX.value = 0;
         charWorldX = refs.totalScroll.value + refs.charX.value;
         inFlatZone = charWorldX < FLAT_ZONE_LENGTH;
@@ -277,29 +307,46 @@ export const useGameSimulation = ({
           refs.flipLockedUntilLanding.value = 0;
           refs.lastGroundedAtMs.value = refs.simTimeMs.value;
           refs.velocityX.value = 0;
+          if (refs.charX.value > anchorX) {
+            refs.charX.value = Math.max(anchorX, refs.charX.value - RUN_SPEED * (stepDt / 1000));
+          }
         } else if (refs.velocityX.value > 0) {
-          refs.totalScroll.value += refs.velocityX.value * (stepDt / 1000);
+          refs.charX.value += refs.velocityX.value * (stepDt / 1000);
           refs.velocityX.value *= FLIP_ARC_DECAY;
           if (refs.velocityX.value < 1) refs.velocityX.value = 0;
         }
 
-        if (!inFlatZone && !grounded) {
+        if (refs.charX.value + charW < PLAYER_LEFT_KILL_MARGIN) {
+          refs.dying.value = 1;
+          refs.deathScore.value = Math.floor(refs.raceProgress.value);
+          refs.velocityX.value = 0;
+          emitImmediateDeathState();
+          if (onLocalDeath) {
+            scheduleOnRN(onLocalDeath, refs.deathScore.value);
+          }
+          finishRunImmediately(refs.deathScore.value);
+          return;
+        }
+
+        if (refs.dying.value === 0 && !inFlatZone && !grounded) {
           if (gDir === 1) {
             // Downward gravity only dies once the player truly drops below the main bottom lane.
             // This prevents false deaths near mid-air/pillar platforms.
             const deathThreshold = gY + charH * DEATH_MARGIN_FRACTION;
             if (refs.posY.value + charH > deathThreshold) {
               refs.dying.value = 1;
-              refs.deathScore.value = Math.floor(refs.totalScroll.value);
+              refs.deathScore.value = Math.floor(refs.raceProgress.value);
               refs.velocityX.value = 0;
+              emitImmediateDeathState();
               if (onLocalDeath) {
                 scheduleOnRN(onLocalDeath, refs.deathScore.value);
               }
             }
           } else if (refs.posY.value < -charH * DEATH_MARGIN_FRACTION) {
             refs.dying.value = 1;
-            refs.deathScore.value = Math.floor(refs.totalScroll.value);
+            refs.deathScore.value = Math.floor(refs.raceProgress.value);
             refs.velocityX.value = 0;
+            emitImmediateDeathState();
             if (onLocalDeath) {
               scheduleOnRN(onLocalDeath, refs.deathScore.value);
             }
@@ -333,14 +380,13 @@ export const useGameSimulation = ({
       refs.simTimeMs.value - refs.lastMultiplayerStateAtMs.value >= MULTIPLAYER_STATE_INTERVAL_MS
     ) {
       refs.lastMultiplayerStateAtMs.value = refs.simTimeMs.value;
-      const laneSpan = Math.max(1, height - 2 * groundHeight - charH);
       const normalizedY = (refs.posY.value - groundHeight) / laneSpan;
       scheduleOnRN(onLocalState, {
         normalizedY,
         gravityDir: refs.gravityDirection.value === -1 ? -1 : 1,
-        scroll: refs.totalScroll.value,
+        scroll: refs.raceProgress.value,
         alive: refs.dying.value === 0 && refs.gameOver.value === 0,
-        score: Math.floor(refs.totalScroll.value),
+        score: Math.floor(refs.raceProgress.value),
         pose: resolvePoseFromPhysics(
           refs.countdownLocked.value,
           refs.flipLockedUntilLanding.value,
