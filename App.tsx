@@ -1088,11 +1088,13 @@ function AppContent() {
       normalizedY: number;
       gravityDir: 1 | -1;
       scroll: number;
+      charX: number;
       alive: boolean;
       score: number;
       pose: 'idle' | 'run' | 'jump' | 'fall';
       frameIndex: number;
       velocityY: number;
+      velocityX: number;
       flipLocked: 0 | 1;
       countdownLocked: 0 | 1;
     }) => {

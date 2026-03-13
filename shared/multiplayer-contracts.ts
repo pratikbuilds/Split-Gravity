@@ -41,11 +41,13 @@ export interface MatchStatePacket {
   normalizedY: number;
   gravityDir: 1 | -1;
   scroll: number;
+  charX: number;
   alive: boolean;
   score: number;
   /** Animation state for opponent sprite (idle/run/jump/fall) */
   frameIndex?: number;
   velocityY?: number;
+  velocityX?: number;
   flipLocked?: 0 | 1;
   countdownLocked?: 0 | 1;
 }

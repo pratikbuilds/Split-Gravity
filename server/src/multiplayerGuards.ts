@@ -9,6 +9,8 @@ export const MAX_CLIENT_ID_LENGTH = 128;
 export const MAX_NICKNAME_LENGTH = 24;
 export const MAX_SCROLL = 1_000_000;
 export const MAX_SCORE = 1_000_000;
+export const MAX_CHAR_X_MAGNITUDE = 5_000;
+export const MAX_HORIZONTAL_VELOCITY = 2_000;
 
 export const normalizeRoomCode = (roomCode: string) => roomCode.trim().toUpperCase();
 
@@ -46,8 +48,15 @@ export const isValidMatchStatePayload = (payload: MatchStatePacket) => {
     return false;
   if (payload.gravityDir !== 1 && payload.gravityDir !== -1) return false;
   if (!hasFinite(payload.scroll) || payload.scroll < 0 || payload.scroll > MAX_SCROLL) return false;
+  if (!hasFinite(payload.charX) || Math.abs(payload.charX) > MAX_CHAR_X_MAGNITUDE) return false;
   if (typeof payload.alive !== 'boolean') return false;
   if (!hasFinite(payload.score) || payload.score < 0 || payload.score > MAX_SCORE) return false;
+  if (
+    payload.velocityX != null &&
+    (!hasFinite(payload.velocityX) || Math.abs(payload.velocityX) > MAX_HORIZONTAL_VELOCITY)
+  ) {
+    return false;
+  }
   return true;
 };
 

@@ -39,12 +39,14 @@ export interface OpponentSnapshot {
   normalizedY: number;
   gravityDir: 1 | -1;
   scroll: number;
+  charX: number;
   alive: boolean;
   score: number;
   t: number;
   /** Animation state for opponent sprite */
   frameIndex: number;
   velocityY: number;
+  velocityX: number;
   flipLocked: 0 | 1;
   countdownLocked: 0 | 1;
 }

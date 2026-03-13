@@ -11,7 +11,6 @@ import {
   CHAR_SCALE,
   CHAR_SIZE,
   ENABLE_COLLIDER_DEBUG_UI,
-  OPPONENT_X_FACTOR,
   PLAYER_X_FACTOR,
   tileSize,
 } from './constants';
@@ -129,11 +128,13 @@ interface UseWorldPicturesArgs {
     | 'posY'
     | 'gravityDirection'
     | 'opponentPosY'
+    | 'opponentPosX'
     | 'opponentGravity'
     | 'opponentAlive'
     | 'opponentPoseCode'
     | 'opponentFrameIndex'
     | 'opponentVelocityY'
+    | 'opponentVelocityX'
     | 'opponentFlipLocked'
     | 'opponentCountdownLocked'
   >;
@@ -278,13 +279,12 @@ export const useWorldPictures = ({
     );
     const hitboxSize = CHAR_SIZE * CHAR_SCALE;
     const { scale, feetTrim } = resolveRenderMetrics(opponentPreset, frame, hitboxSize, 1);
-    const ox = width * OPPONENT_X_FACTOR;
     const gDir = refs.opponentGravity.value;
     const { x, y } = resolveSpriteBasePosition({
       frame,
       scale,
       gravityDirection: gDir === -1 ? -1 : 1,
-      worldAnchorX: ox + hitboxSize / 2,
+      worldAnchorX: refs.opponentPosX.value + hitboxSize / 2,
       worldAnchorY:
         gDir === -1
           ? refs.opponentPosY.value - feetTrim

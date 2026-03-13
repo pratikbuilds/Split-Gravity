@@ -128,11 +128,13 @@ interface UseGameSimulationArgs {
     normalizedY: number;
     gravityDir: 1 | -1;
     scroll: number;
+    charX: number;
     alive: boolean;
     score: number;
     pose: 'idle' | 'run' | 'jump' | 'fall';
     frameIndex: number;
     velocityY: number;
+    velocityX: number;
     flipLocked: 0 | 1;
     countdownLocked: 0 | 1;
   }) => void;
@@ -169,11 +171,13 @@ export const useGameSimulation = ({
         normalizedY,
         gravityDir: refs.gravityDirection.value === -1 ? -1 : 1,
         scroll: refs.raceProgress.value,
+        charX: refs.charX.value,
         alive: false,
         score: Math.floor(refs.raceProgress.value),
         pose: 'fall',
         frameIndex: refs.frameIndex.value,
         velocityY: refs.velocityY.value,
+        velocityX: refs.velocityX.value,
         flipLocked: (refs.flipLockedUntilLanding.value === 1 ? 1 : 0) as 0 | 1,
         countdownLocked: 0 as 0 | 1,
       });
@@ -385,6 +389,7 @@ export const useGameSimulation = ({
         normalizedY,
         gravityDir: refs.gravityDirection.value === -1 ? -1 : 1,
         scroll: refs.raceProgress.value,
+        charX: refs.charX.value,
         alive: refs.dying.value === 0 && refs.gameOver.value === 0,
         score: Math.floor(refs.raceProgress.value),
         pose: resolvePoseFromPhysics(
@@ -394,6 +399,7 @@ export const useGameSimulation = ({
         ),
         frameIndex: refs.frameIndex.value,
         velocityY: refs.velocityY.value,
+        velocityX: refs.velocityX.value,
         flipLocked: (refs.flipLockedUntilLanding.value === 1 ? 1 : 0) as 0 | 1,
         countdownLocked: (refs.countdownLocked.value === 1 ? 1 : 0) as 0 | 1,
       });

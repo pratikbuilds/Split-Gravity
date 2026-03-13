@@ -148,11 +148,13 @@ export class MultiplayerMatchController {
       normalizedY: opponentGravityDir === -1 ? 0 : 1,
       gravityDir: opponentGravityDir,
       scroll: phase === 'running' ? (existing?.scroll ?? 0) : 0,
+      charX: existing?.playerId === opponent.playerId ? existing.charX : 0,
       alive: phase === 'result' ? Boolean(opponent.alive) : true,
       score: phase === 'running' ? (existing?.score ?? 0) : 0,
       t: options?.t ?? Date.now(),
       frameIndex: existing?.playerId === opponent.playerId ? existing.frameIndex : 0,
       velocityY: 0,
+      velocityX: 0,
       flipLocked: 0,
       countdownLocked: phase === 'running' ? 0 : 1,
     };
@@ -167,18 +169,19 @@ export class MultiplayerMatchController {
     );
   }
 
-  private promoteOpponentSnapshotToRunning(snapshot: OpponentSnapshot | null) {
+  private promoteOpponentSnapshotToRunning(snapshot: OpponentSnapshot | null): OpponentSnapshot | null {
     if (!snapshot) return null;
     if (snapshot.phase === 'running' && snapshot.countdownLocked === 0) {
       return snapshot;
     }
-    return {
+    const promoted: OpponentSnapshot = {
       ...snapshot,
       phase: 'running',
       pose: snapshot.alive ? (snapshot.pose === 'idle' ? 'run' : snapshot.pose) : 'fall',
       countdownLocked: 0,
       t: Math.max(snapshot.t, Date.now()),
     };
+    return promoted;
   }
 
   private resetOutgoingStateTracking() {
@@ -425,6 +428,7 @@ export class MultiplayerMatchController {
         gravityDir: snapshot.gravityDir === 1 ? -1 : 1,
         pose: 'jump',
         velocityY: 0,
+        velocityX: snapshot.velocityX > 0 ? snapshot.velocityX : 80,
         flipLocked: 1,
         countdownLocked: 0,
         t: Math.max(snapshot.t, t),
@@ -457,11 +461,13 @@ export class MultiplayerMatchController {
         normalizedY: state.normalizedY,
         gravityDir: state.gravityDir,
         scroll: state.scroll,
+        charX: state.charX,
         alive: state.alive,
         score: state.score,
         t: state.t,
         frameIndex: state.frameIndex ?? 0,
         velocityY: state.velocityY ?? 0,
+        velocityX: state.velocityX ?? 0,
         flipLocked: state.flipLocked ?? 0,
         countdownLocked: state.countdownLocked ?? 0,
       };
@@ -933,7 +939,7 @@ export class MultiplayerMatchController {
       return;
     }
     const now = Date.now();
-    const minIntervalMs = 33; // 30Hz uplink keeps the local sim lighter while remote prediction fills gaps
+    const minIntervalMs = 16; // 60Hz uplink gives the remote replay path enough data to stay attached to platforms
     const nextPayload = {
       ...payload,
       phase: 'running' as const,
@@ -943,9 +949,11 @@ export class MultiplayerMatchController {
       prev &&
       Math.abs(prev.normalizedY - nextPayload.normalizedY) < 0.002 &&
       Math.abs(prev.scroll - nextPayload.scroll) < 0.5 &&
+      Math.abs(prev.charX - nextPayload.charX) < 0.5 &&
       prev.gravityDir === nextPayload.gravityDir &&
       prev.alive === nextPayload.alive &&
       prev.pose === nextPayload.pose &&
+      Math.abs((prev.velocityX ?? 0) - (nextPayload.velocityX ?? 0)) < 0.5 &&
       prev.flipLocked === nextPayload.flipLocked &&
       prev.countdownLocked === nextPayload.countdownLocked;
     if (now - this.lastStateSentAt < minIntervalMs && smallDelta) {

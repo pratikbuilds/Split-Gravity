@@ -21,7 +21,10 @@ import {
   DEATH_MARGIN_FRACTION,
   EDGE_CONTACT_MARGIN,
   ENABLE_COLLIDER_DEBUG_UI,
+  FLIP_ARC_DECAY,
+  GRAVITY,
   OPPONENT_X_FACTOR,
+  RUN_SPEED,
   groundHeight,
 } from './game/constants';
 import { useGameGestures } from './game/useGameGestures';
@@ -35,8 +38,9 @@ import { COUNTDOWN_DIGIT_ASSETS } from './game/worldAssetSources';
 const SCORE_DISPLAY_BUCKET = 10;
 const OPPONENT_SCORE_DISPLAY_BUCKET = 10;
 const DEBUG_OVERLAY_UPDATE_MS = 80;
-const OPPONENT_PATH_CORRECTION_SPEED = 18;
+const OPPONENT_PACKET_BLEND = 0.45;
 const OPPONENT_MAX_VISUAL_SNAP_DISTANCE = 96;
+const OPPONENT_MAX_LAG_COMPENSATION_MS = 100;
 const resolveCountdownDigit = (remainingMs: number): 5 | 4 | 3 | 2 | 1 | null => {
   if (remainingMs > 4_000) return 5;
   if (remainingMs > 3_000) return 4;
@@ -157,6 +161,7 @@ type DebugOverlayProps = {
     | 'velocityY'
     | 'gravityDirection'
     | 'opponentPosY'
+    | 'opponentPosX'
     | 'opponentGravity'
     | 'totalScroll'
     | 'simTimeMs'
@@ -326,12 +331,14 @@ export const GameCanvas = ({
   const platformRects = useSharedValue<number[]>([]);
   const lastMultiplayerStateAtMs = useSharedValue(0);
   const opponentPosY = useSharedValue(0);
+  const opponentPosX = useSharedValue(0);
   const opponentTargetY = useSharedValue(0);
   const opponentGravity = useSharedValue(1);
   const opponentAlive = useSharedValue(0);
   const opponentPoseCode = useSharedValue<number>(OPPONENT_POSE_IDLE);
   const opponentFrameIndex = useSharedValue(0);
   const opponentVelocityY = useSharedValue(0);
+  const opponentVelocityX = useSharedValue(0);
   const opponentFlipLocked = useSharedValue(0);
   const opponentCountdownLocked = useSharedValue(0);
   const opponentDying = useSharedValue(0);
@@ -361,11 +368,13 @@ export const GameCanvas = ({
       platformRects,
       lastMultiplayerStateAtMs,
       opponentPosY,
+      opponentPosX,
       opponentGravity,
       opponentAlive,
       opponentPoseCode,
       opponentFrameIndex,
       opponentVelocityY,
+      opponentVelocityX,
       opponentFlipLocked,
       opponentCountdownLocked,
     }),
@@ -389,9 +398,11 @@ export const GameCanvas = ({
       opponentFlipLocked,
       opponentFrameIndex,
       opponentGravity,
+      opponentPosX,
       opponentPoseCode,
       opponentPosY,
       opponentVelocityY,
+      opponentVelocityX,
       platformRects,
       posY,
       simTimeMs,
@@ -498,12 +509,14 @@ export const GameCanvas = ({
       opponentInitialGravityDirection ?? (initialGravityDirection === 1 ? -1 : 1);
     opponentGravity.value = opponentSpawnGravity;
     const spawnY = opponentSpawnGravity === -1 ? groundHeight : stableGroundY - charH;
+    opponentPosX.value = width * OPPONENT_X_FACTOR;
     opponentPosY.value = spawnY;
     opponentTargetY.value = spawnY;
     opponentAlive.value = opponentCharacterId ? 1 : 0;
     opponentPoseCode.value = OPPONENT_POSE_IDLE;
     opponentFrameIndex.value = 0;
     opponentVelocityY.value = 0;
+    opponentVelocityX.value = 0;
     opponentFlipLocked.value = 0;
     opponentCountdownLocked.value = 1;
     opponentDying.value = 0;
@@ -517,13 +530,16 @@ export const GameCanvas = ({
     opponentFrameIndex,
     opponentGravity,
     opponentInitialGravityDirection,
+    opponentPosX,
     opponentPosY,
     opponentPoseCode,
     opponentTargetY,
     opponentVelocityY,
+    opponentVelocityX,
     opponentDying,
     restartKey,
     stableGroundY,
+    width,
   ]);
 
   useEffect(() => {
@@ -684,8 +700,25 @@ export const GameCanvas = ({
         }
         return;
       }
+      const lagMs = Math.min(
+        Math.max(Date.now() - snapshot.t, 0),
+        OPPONENT_MAX_LAG_COMPENSATION_MS
+      );
+      const lagSec = lagMs / 1000;
       const laneSpan = Math.max(1, height - 2 * groundHeight - charSize);
       const targetY = groundHeight + snapshot.normalizedY * laneSpan;
+      const predictedScreenX =
+        snapshot.scroll +
+        RUN_SPEED * lagSec +
+        snapshot.charX +
+        (snapshot.velocityX ?? 0) * lagSec -
+        refs.totalScroll.value;
+      const predictedVelocityY =
+        snapshot.velocityY + snapshot.gravityDir * GRAVITY * lagSec;
+      const predictedY =
+        targetY +
+        snapshot.velocityY * lagSec +
+        0.5 * snapshot.gravityDir * GRAVITY * lagSec * lagSec;
       const runningPhase = snapshot.phase === 'running';
       const wasCountdownLocked = opponentCountdownLocked.value === 1;
       opponentGravity.value = snapshot.gravityDir;
@@ -697,7 +730,9 @@ export const GameCanvas = ({
       if (!runningPhase) {
         opponentAlive.value = 1;
         opponentDying.value = 0;
+        opponentPosX.value = width * OPPONENT_X_FACTOR;
         opponentPosY.value = targetY;
+        opponentVelocityX.value = 0;
         opponentVelocityY.value = 0;
         opponentPoseCode.value = OPPONENT_POSE_IDLE;
         return;
@@ -707,23 +742,31 @@ export const GameCanvas = ({
         const shouldSnapToTarget =
           opponentDying.value === 1 ||
           wasCountdownLocked ||
-          Math.abs(targetY - opponentPosY.value) > OPPONENT_MAX_VISUAL_SNAP_DISTANCE;
+          Math.abs(predictedY - opponentPosY.value) > OPPONENT_MAX_VISUAL_SNAP_DISTANCE ||
+          Math.abs(predictedScreenX - opponentPosX.value) > OPPONENT_MAX_VISUAL_SNAP_DISTANCE;
         if (shouldSnapToTarget) {
-          opponentPosY.value = targetY;
+          opponentPosX.value = predictedScreenX;
+          opponentPosY.value = predictedY;
+        } else {
+          opponentPosX.value += (predictedScreenX - opponentPosX.value) * OPPONENT_PACKET_BLEND;
+          opponentPosY.value += (predictedY - opponentPosY.value) * OPPONENT_PACKET_BLEND;
         }
         opponentAlive.value = 1;
         opponentDying.value = 0;
-        opponentVelocityY.value = snapshot.velocityY;
+        opponentVelocityX.value = snapshot.velocityX;
+        opponentVelocityY.value = predictedVelocityY;
         opponentPoseCode.value = resolvePoseCode(snapshot.pose);
         return;
       }
 
       if (opponentDying.value === 0) {
+        opponentPosX.value = predictedScreenX;
         opponentPosY.value = targetY;
       }
       opponentAlive.value = 1;
       opponentDying.value = 1;
-      opponentVelocityY.value = snapshot.velocityY;
+      opponentVelocityX.value = snapshot.velocityX;
+      opponentVelocityY.value = predictedVelocityY;
       opponentPoseCode.value = resolvePoseCode('fall');
     },
     [
@@ -735,11 +778,15 @@ export const GameCanvas = ({
       opponentFlipLocked,
       opponentFrameIndex,
       opponentGravity,
+      opponentPosX,
       opponentPoseCode,
       opponentPosY,
       opponentTargetY,
       opponentVelocityY,
+      opponentVelocityX,
       opponentSnapshotSignal,
+      refs.totalScroll,
+      width,
     ]
   );
 
@@ -747,20 +794,21 @@ export const GameCanvas = ({
     'worklet';
     if (opponentAlive.value !== 1) return;
     if (opponentCountdownLocked.value === 1) {
+      opponentPosX.value = width * OPPONENT_X_FACTOR;
       opponentPosY.value = opponentTargetY.value;
       return;
     }
 
     const rawDt = frameInfo.timeSincePreviousFrame ?? 16;
-    const correctionBlend = Math.min((rawDt / 1000) * OPPONENT_PATH_CORRECTION_SPEED, 1);
-    const deltaY = opponentTargetY.value - opponentPosY.value;
-    if (Math.abs(deltaY) > OPPONENT_MAX_VISUAL_SNAP_DISTANCE) {
-      opponentPosY.value = opponentTargetY.value;
-    } else if (Math.abs(deltaY) <= 0.5) {
-      opponentPosY.value = opponentTargetY.value;
-    } else {
-      opponentPosY.value += deltaY * correctionBlend;
+    const dtSec = rawDt / 1000;
+    const horizontalDecay = Math.pow(FLIP_ARC_DECAY, rawDt / 16);
+    opponentPosX.value += opponentVelocityX.value * dtSec;
+    opponentVelocityX.value *= horizontalDecay;
+    if (Math.abs(opponentVelocityX.value) < 1) {
+      opponentVelocityX.value = 0;
     }
+    opponentVelocityY.value += opponentGravity.value * GRAVITY * dtSec;
+    opponentPosY.value += opponentVelocityY.value * dtSec;
 
     if (opponentDying.value === 1) {
       const offscreenDown = opponentPosY.value > height + charSize;

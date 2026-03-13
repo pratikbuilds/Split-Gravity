@@ -39,11 +39,13 @@ export type GameCanvasProps = {
     normalizedY: number;
     gravityDir: GravityDirection;
     scroll: number;
+    charX: number;
     alive: boolean;
     score: number;
     pose: OpponentPose;
     frameIndex: number;
     velocityY: number;
+    velocityX: number;
     flipLocked: 0 | 1;
     countdownLocked: 0 | 1;
   }) => void;
@@ -72,11 +74,13 @@ export interface SimulationRefs {
   platformRects: SharedValue<number[]>;
   lastMultiplayerStateAtMs: SharedValue<number>;
   opponentPosY: SharedValue<number>;
+  opponentPosX: SharedValue<number>;
   opponentGravity: SharedValue<number>;
   opponentAlive: SharedValue<number>;
   opponentPoseCode: SharedValue<number>;
   opponentFrameIndex: SharedValue<number>;
   opponentVelocityY: SharedValue<number>;
+  opponentVelocityX: SharedValue<number>;
   opponentFlipLocked: SharedValue<number>;
   opponentCountdownLocked: SharedValue<number>;
 }
