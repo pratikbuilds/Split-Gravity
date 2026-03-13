@@ -416,29 +416,15 @@ export class MultiplayerMatchController {
 
     this.socket.on('match:opponentInput', ({ playerId, inputType, t }) => {
       const opponent = this.state.opponent;
-      const snapshot = this.state.opponentSnapshot;
-      if (!opponent || opponent.playerId !== playerId || !snapshot || !snapshot.alive) return;
-      if (inputType !== 'flip' || (snapshot.phase !== 'running' && !this.isGameplayActive())) {
+      if (!opponent || opponent.playerId !== playerId) return;
+      if (inputType !== 'flip' || !this.isGameplayActive()) {
         return;
       }
-
-      const optimisticSnapshot: OpponentSnapshot = {
-        ...snapshot,
-        phase: 'running',
-        gravityDir: snapshot.gravityDir === 1 ? -1 : 1,
-        pose: 'jump',
-        velocityY: 0,
-        velocityX: snapshot.velocityX > 0 ? snapshot.velocityX : 80,
-        flipLocked: 1,
-        countdownLocked: 0,
-        t: Math.max(snapshot.t, t),
-      };
-
-      this.state = {
-        ...this.state,
-        opponentSnapshot: optimisticSnapshot,
-      };
-      this.emitOpponentSnapshot(optimisticSnapshot);
+      this.debugLog('opponent.input.received', {
+        playerId,
+        inputType,
+        t,
+      });
     });
 
     this.socket.on('match:opponentState', ({ playerId, state }) => {

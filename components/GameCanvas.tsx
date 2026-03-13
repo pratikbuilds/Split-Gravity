@@ -14,7 +14,6 @@ import type { SharedValue } from 'react-native-reanimated';
 import { useAnimatedReaction, useFrameCallback, useSharedValue } from 'react-native-reanimated';
 import { Atlas, Canvas, Group, Line, Picture, Rect } from '@shopify/react-native-skia';
 import { scheduleOnRN } from 'react-native-worklets';
-import { isGrounded, scanCollisionSurfaces } from '../shared/game/physics';
 import { FLAT_ZONE_LENGTH, type GameAudioEvent, type OpponentSnapshot } from '../types/game';
 import {
   CHAR_SCALE,
@@ -22,18 +21,12 @@ import {
   DEATH_MARGIN_FRACTION,
   EDGE_CONTACT_MARGIN,
   ENABLE_COLLIDER_DEBUG_UI,
-  FLIP_ARC_DECAY,
-  GRAVITY,
-  GROUNDED_EPSILON,
-  LANDING_MIN_OVERLAP,
-  OPPONENT_X_FACTOR,
-  RUN_SPEED,
-  SUPPORT_MIN_OVERLAP,
   groundHeight,
 } from './game/constants';
 import { useGameGestures } from './game/useGameGestures';
 import { useGameSimulation } from './game/useGameSimulation';
-import { OPPONENT_POSE_IDLE, resolvePoseCode } from './game/multiplayerPose';
+import { OPPONENT_POSE_IDLE } from './game/multiplayerPose';
+import { useOpponentPlayback } from './game/useOpponentPlayback';
 import { useScoreAndChunks } from './game/useScoreAndChunks';
 import type { GameCanvasProps, GravityDirection, SimulationRefs } from './game/types';
 import { useWorldPictures } from './game/useWorldPictures';
@@ -42,9 +35,6 @@ import { COUNTDOWN_DIGIT_ASSETS } from './game/worldAssetSources';
 const SCORE_DISPLAY_BUCKET = 10;
 const OPPONENT_SCORE_DISPLAY_BUCKET = 10;
 const DEBUG_OVERLAY_UPDATE_MS = 80;
-const OPPONENT_PACKET_BLEND = 0.45;
-const OPPONENT_MAX_VISUAL_SNAP_DISTANCE = 96;
-const OPPONENT_MAX_LAG_COMPENSATION_MS = 100;
 const resolveCountdownDigit = (remainingMs: number): 5 | 4 | 3 | 2 | 1 | null => {
   if (remainingMs > 4_000) return 5;
   if (remainingMs > 3_000) return 4;
@@ -52,71 +42,6 @@ const resolveCountdownDigit = (remainingMs: number): 5 | 4 | 3 | 2 | 1 | null =>
   if (remainingMs > 1_000) return 2;
   if (remainingMs > 0) return 1;
   return null;
-};
-
-const resolveRemoteGroundSnapY = ({
-  gravityDir,
-  inFlatZone,
-  posY,
-  charH,
-  groundY,
-  flatTopY,
-  rects,
-  footLeft,
-  footRight,
-}: {
-  gravityDir: 1 | -1;
-  inFlatZone: boolean;
-  posY: number;
-  charH: number;
-  groundY: number;
-  flatTopY: number;
-  rects: number[];
-  footLeft: number;
-  footRight: number;
-}) => {
-  'worklet';
-  let bestTarget: number | null = null;
-  let bestDelta = Number.POSITIVE_INFINITY;
-
-  const tryTarget = (targetY: number) => {
-    const delta = Math.abs(posY - targetY);
-    if (delta <= GROUNDED_EPSILON && delta < bestDelta) {
-      bestDelta = delta;
-      bestTarget = targetY;
-    }
-  };
-
-  if (gravityDir === 1) {
-    if (inFlatZone) {
-      tryTarget(groundY - charH);
-    }
-    for (let i = 0; i < rects.length; i += 4) {
-      const px = rects[i];
-      const py = rects[i + 1];
-      const pw = rects[i + 2];
-      const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
-      if (overlap >= SUPPORT_MIN_OVERLAP) {
-        tryTarget(py - charH);
-      }
-    }
-    return bestTarget;
-  }
-
-  if (inFlatZone) {
-    tryTarget(flatTopY);
-  }
-  for (let i = 0; i < rects.length; i += 4) {
-    const px = rects[i];
-    const py = rects[i + 1];
-    const pw = rects[i + 2];
-    const ph = rects[i + 3];
-    const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
-    if (overlap >= SUPPORT_MIN_OVERLAP) {
-      tryTarget(py + ph);
-    }
-  }
-  return bestTarget;
 };
 
 type DebugOverlayState = {
@@ -127,6 +52,7 @@ type DebugOverlayState = {
   playerCenterY: number;
   playerVelocityY: number;
   playerGravityY: number;
+  opponentX: number;
   opponentY: number;
   opponentFootY: number;
   flatZoneX: number;
@@ -241,7 +167,6 @@ type DebugOverlayProps = {
   stableGroundY: number;
   deathLineBottom: number;
   deathLineTop: number;
-  opponentX: number;
 };
 
 const DebugOverlay = React.memo(
@@ -253,7 +178,6 @@ const DebugOverlay = React.memo(
     stableGroundY,
     deathLineBottom,
     deathLineTop,
-    opponentX,
   }: DebugOverlayProps) => {
     const [overlay, setOverlay] = useState<DebugOverlayState | null>(null);
 
@@ -272,6 +196,7 @@ const DebugOverlay = React.memo(
         const playerCenterY = playerY + charSize / 2;
         const playerVelocityY = playerCenterY + refs.velocityY.value * 0.06;
         const playerGravityY = playerCenterY + (gravityDown ? 26 : -26);
+        const opponentX = refs.opponentPosX.value;
         const opponentY = refs.opponentPosY.value;
         const opponentFootY = refs.opponentGravity.value === -1 ? opponentY : opponentY + charSize;
         const flatZoneX = FLAT_ZONE_LENGTH - refs.totalScroll.value;
@@ -283,6 +208,7 @@ const DebugOverlay = React.memo(
           playerCenterY,
           playerVelocityY,
           playerGravityY,
+          opponentX,
           opponentY,
           opponentFootY,
           flatZoneX,
@@ -334,7 +260,7 @@ const DebugOverlay = React.memo(
         />
 
         <Rect
-          x={opponentX}
+          x={overlay.opponentX}
           y={overlay.opponentY}
           width={charSize}
           height={charSize}
@@ -343,8 +269,11 @@ const DebugOverlay = React.memo(
           strokeWidth={2}
         />
         <Line
-          p1={{ x: opponentX + EDGE_CONTACT_MARGIN, y: overlay.opponentFootY }}
-          p2={{ x: opponentX + charSize - EDGE_CONTACT_MARGIN, y: overlay.opponentFootY }}
+          p1={{ x: overlay.opponentX + EDGE_CONTACT_MARGIN, y: overlay.opponentFootY }}
+          p2={{
+            x: overlay.opponentX + charSize - EDGE_CONTACT_MARGIN,
+            y: overlay.opponentFootY,
+          }}
           color="#fdba74"
         />
       </>
@@ -401,7 +330,6 @@ export const GameCanvas = ({
   const lastMultiplayerStateAtMs = useSharedValue(0);
   const opponentPosY = useSharedValue(0);
   const opponentPosX = useSharedValue(0);
-  const opponentTargetY = useSharedValue(0);
   const opponentGravity = useSharedValue(1);
   const opponentAlive = useSharedValue(0);
   const opponentPoseCode = useSharedValue<number>(OPPONENT_POSE_IDLE);
@@ -410,7 +338,6 @@ export const GameCanvas = ({
   const opponentVelocityX = useSharedValue(0);
   const opponentFlipLocked = useSharedValue(0);
   const opponentCountdownLocked = useSharedValue(0);
-  const opponentDying = useSharedValue(0);
   const assetsReady = useSharedValue(0);
   const multiplayerCountdownStartAtValue = useSharedValue(0);
 
@@ -578,9 +505,8 @@ export const GameCanvas = ({
       opponentInitialGravityDirection ?? (initialGravityDirection === 1 ? -1 : 1);
     opponentGravity.value = opponentSpawnGravity;
     const spawnY = opponentSpawnGravity === -1 ? groundHeight : stableGroundY - charH;
-    opponentPosX.value = width * OPPONENT_X_FACTOR;
+    opponentPosX.value = 0;
     opponentPosY.value = spawnY;
-    opponentTargetY.value = spawnY;
     opponentAlive.value = opponentCharacterId ? 1 : 0;
     opponentPoseCode.value = OPPONENT_POSE_IDLE;
     opponentFrameIndex.value = 0;
@@ -588,7 +514,6 @@ export const GameCanvas = ({
     opponentVelocityX.value = 0;
     opponentFlipLocked.value = 0;
     opponentCountdownLocked.value = 1;
-    opponentDying.value = 0;
   }, [
     charSize,
     initialGravityDirection,
@@ -602,13 +527,10 @@ export const GameCanvas = ({
     opponentPosX,
     opponentPosY,
     opponentPoseCode,
-    opponentTargetY,
     opponentVelocityY,
     opponentVelocityX,
-    opponentDying,
     restartKey,
     stableGroundY,
-    width,
   ]);
 
   useEffect(() => {
@@ -755,208 +677,14 @@ export const GameCanvas = ({
 
   const fallbackOpponentSnapshotValue = useSharedValue<OpponentSnapshot | null>(null);
   const opponentSnapshotSignal = opponentSnapshotValue ?? fallbackOpponentSnapshotValue;
-
-  useAnimatedReaction(
-    () => {
-      'worklet';
-      return opponentSnapshotSignal.value;
-    },
-    (snapshot) => {
-      'worklet';
-      if (!snapshot) {
-        if (opponentDying.value === 0) {
-          opponentAlive.value = 0;
-        }
-        return;
-      }
-      const lagMs = Math.min(
-        Math.max(Date.now() - snapshot.t, 0),
-        OPPONENT_MAX_LAG_COMPENSATION_MS
-      );
-      const lagSec = lagMs / 1000;
-      const laneSpan = Math.max(1, height - 2 * groundHeight - charSize);
-      const targetY = groundHeight + snapshot.normalizedY * laneSpan;
-      const predictedWorldX =
-        snapshot.worldX + (RUN_SPEED + (snapshot.velocityX ?? 0)) * lagSec;
-      const predictedScreenX = predictedWorldX - refs.totalScroll.value;
-      const predictedVelocityY =
-        snapshot.velocityY + snapshot.gravityDir * GRAVITY * lagSec;
-      const predictedY =
-        targetY +
-        snapshot.velocityY * lagSec +
-        0.5 * snapshot.gravityDir * GRAVITY * lagSec * lagSec;
-      const runningPhase = snapshot.phase === 'running';
-      const wasCountdownLocked = opponentCountdownLocked.value === 1;
-      opponentGravity.value = snapshot.gravityDir;
-      opponentTargetY.value = targetY;
-      opponentFrameIndex.value = snapshot.frameIndex;
-      opponentFlipLocked.value = snapshot.flipLocked;
-      opponentCountdownLocked.value = runningPhase ? snapshot.countdownLocked : 1;
-
-      if (!runningPhase) {
-        opponentAlive.value = 1;
-        opponentDying.value = 0;
-        opponentPosX.value = width * OPPONENT_X_FACTOR;
-        opponentPosY.value = targetY;
-        opponentVelocityX.value = 0;
-        opponentVelocityY.value = 0;
-        opponentPoseCode.value = OPPONENT_POSE_IDLE;
-        return;
-      }
-
-      if (snapshot.alive) {
-        const shouldSnapToTarget =
-          opponentDying.value === 1 ||
-          wasCountdownLocked ||
-          Math.abs(predictedY - opponentPosY.value) > OPPONENT_MAX_VISUAL_SNAP_DISTANCE ||
-          Math.abs(predictedScreenX - opponentPosX.value) > OPPONENT_MAX_VISUAL_SNAP_DISTANCE;
-        if (shouldSnapToTarget) {
-          opponentPosX.value = predictedScreenX;
-          opponentPosY.value = predictedY;
-        } else {
-          opponentPosX.value += (predictedScreenX - opponentPosX.value) * OPPONENT_PACKET_BLEND;
-          opponentPosY.value += (predictedY - opponentPosY.value) * OPPONENT_PACKET_BLEND;
-        }
-        opponentAlive.value = 1;
-        opponentDying.value = 0;
-        opponentVelocityX.value = snapshot.velocityX;
-        opponentVelocityY.value = predictedVelocityY;
-        opponentPoseCode.value = resolvePoseCode(snapshot.pose);
-        return;
-      }
-
-      if (opponentDying.value === 0) {
-        opponentPosX.value = predictedScreenX;
-        opponentPosY.value = targetY;
-      }
-      opponentAlive.value = 1;
-      opponentDying.value = 1;
-      opponentVelocityX.value = snapshot.velocityX;
-      opponentVelocityY.value = predictedVelocityY;
-      opponentPoseCode.value = resolvePoseCode('fall');
-    },
-    [
-      charSize,
-      height,
-      opponentAlive,
-      opponentCountdownLocked,
-      opponentDying,
-      opponentFlipLocked,
-      opponentFrameIndex,
-      opponentGravity,
-      opponentPosX,
-      opponentPoseCode,
-      opponentPosY,
-      opponentTargetY,
-      opponentVelocityY,
-      opponentVelocityX,
-      opponentSnapshotSignal,
-      refs.totalScroll,
-      width,
-    ]
-  );
-
-  useFrameCallback((frameInfo) => {
-    'worklet';
-    if (opponentAlive.value !== 1) return;
-    if (opponentCountdownLocked.value === 1) {
-      opponentPosX.value = width * OPPONENT_X_FACTOR;
-      opponentPosY.value = opponentTargetY.value;
-      return;
-    }
-
-    const rawDt = frameInfo.timeSincePreviousFrame ?? 16;
-    const dtSec = rawDt / 1000;
-    const horizontalDecay = Math.pow(FLIP_ARC_DECAY, rawDt / 16);
-    const prevTop = opponentPosY.value;
-    const prevBottom = prevTop + charSize;
-    opponentPosX.value += opponentVelocityX.value * dtSec;
-    opponentVelocityX.value *= horizontalDecay;
-    if (Math.abs(opponentVelocityX.value) < 1) {
-      opponentVelocityX.value = 0;
-    }
-    opponentVelocityY.value += opponentGravity.value * GRAVITY * dtSec;
-    opponentPosY.value += opponentVelocityY.value * dtSec;
-
-    const opponentWorldX = refs.totalScroll.value + opponentPosX.value;
-    const inFlatZone = opponentWorldX < FLAT_ZONE_LENGTH;
-    const footLeft = opponentWorldX + EDGE_CONTACT_MARGIN;
-    const footRight = opponentWorldX + charSize - EDGE_CONTACT_MARGIN;
-    const charBottom = opponentPosY.value + charSize;
-    const { nearestDownSurface, nearestUpSurface } = scanCollisionSurfaces({
-      rects: refs.platformRects.value,
-      footLeft,
-      footRight,
-      prevTop,
-      prevBottom,
-      charTop: opponentPosY.value,
-      charBottom,
-      landingMinOverlap: LANDING_MIN_OVERLAP,
-      groundedEpsilon: GROUNDED_EPSILON,
-    });
-
-    if (opponentGravity.value === 1 && opponentVelocityY.value >= 0) {
-      if (nearestDownSurface < Number.POSITIVE_INFINITY) {
-        opponentPosY.value = nearestDownSurface - charSize;
-        opponentVelocityY.value = 0;
-      } else if (inFlatZone && charBottom >= stableGroundY) {
-        opponentPosY.value = stableGroundY - charSize;
-        opponentVelocityY.value = 0;
-      }
-    } else if (opponentGravity.value === -1 && opponentVelocityY.value <= 0) {
-      if (nearestUpSurface > Number.NEGATIVE_INFINITY) {
-        opponentPosY.value = nearestUpSurface;
-        opponentVelocityY.value = 0;
-      } else if (inFlatZone && opponentPosY.value <= groundHeight) {
-        opponentPosY.value = groundHeight;
-        opponentVelocityY.value = 0;
-      }
-    }
-
-    const grounded = isGrounded({
-      gravityDir: opponentGravity.value === -1 ? -1 : 1,
-      inFlatZone,
-      posY: opponentPosY.value,
-      charH: charSize,
-      groundY: stableGroundY,
-      flatTopY: groundHeight,
-      rects: refs.platformRects.value,
-      footLeft,
-      footRight,
-      supportMinOverlap: SUPPORT_MIN_OVERLAP,
-      groundedEpsilon: GROUNDED_EPSILON,
-    });
-    if (grounded) {
-      const snapY = resolveRemoteGroundSnapY({
-        gravityDir: opponentGravity.value === -1 ? -1 : 1,
-        inFlatZone,
-        posY: opponentPosY.value,
-        charH: charSize,
-        groundY: stableGroundY,
-        flatTopY: groundHeight,
-        rects: refs.platformRects.value,
-        footLeft,
-        footRight,
-      });
-      if (snapY !== null) {
-        opponentPosY.value = snapY;
-      }
-    }
-
-    if (opponentDying.value === 1) {
-      const offscreenDown = opponentPosY.value > height + charSize;
-      const offscreenUp = opponentPosY.value + charSize < -charSize;
-      if (
-        (opponentGravity.value === 1 && offscreenDown) ||
-        (opponentGravity.value === -1 && offscreenUp)
-      ) {
-        opponentAlive.value = 0;
-        opponentDying.value = 0;
-      }
-    }
+  useOpponentPlayback({
+    width,
+    height,
+    charSize,
+    refs,
+    opponentSnapshotSignal,
   });
 
-  const opponentX = width * OPPONENT_X_FACTOR;
   const deathLineBottom = stableGroundY + charSize * DEATH_MARGIN_FRACTION;
   const deathLineTop = -charSize * DEATH_MARGIN_FRACTION;
 
@@ -1014,7 +742,6 @@ export const GameCanvas = ({
               stableGroundY={stableGroundY}
               deathLineBottom={deathLineBottom}
               deathLineTop={deathLineTop}
-              opponentX={opponentX}
             />
           )}
         </Canvas>
