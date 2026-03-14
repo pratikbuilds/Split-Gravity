@@ -1246,6 +1246,14 @@ function AppContent() {
               multiplayerCountdownStartAt={
                 mode.startsWith('multi_') ? multiplayerState.countdownStartAt : undefined
               }
+              multiplayerCountdownServerNow={
+                mode.startsWith('multi_') ? multiplayerState.countdownServerNow : undefined
+              }
+              multiplayerCountdownClientReceivedAt={
+                mode.startsWith('multi_')
+                  ? multiplayerState.countdownClientReceivedAt
+                  : undefined
+              }
               opponentSnapshotValue={mode.startsWith('multi_') ? opponentSnapshotValue : undefined}
               opponentName={
                 mode.startsWith('multi_') ? multiplayerState.opponent?.nickname : undefined

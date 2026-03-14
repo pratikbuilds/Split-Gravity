@@ -96,7 +96,12 @@ export const startServer = async () => {
   };
 
   const emitRoomState = (room: Room) => {
-    io.to(room.roomCode).emit('room:state', snapshotRoom(room));
+    const snapshot = snapshotRoom(room);
+    const payload =
+      room.state === 'COUNTDOWN' || room.state === 'RUNNING'
+        ? { ...snapshot, serverNow: Date.now() }
+        : snapshot;
+    io.to(room.roomCode).emit('room:state', payload);
     logAt('debug', 'room.state.emitted', roomSummary(room));
   };
 
@@ -408,10 +413,12 @@ export const startServer = async () => {
 
     room.state = 'COUNTDOWN';
     room.startedAt = Date.now() + START_COUNTDOWN_MS;
+    const serverNow = Date.now();
     io.to(room.roomCode).emit('match:start', {
       roomCode: room.roomCode,
       seed: room.seed,
       startAt: room.startedAt,
+      serverNow,
       config: {
         reconnectGraceMs: RECONNECT_GRACE_MS,
       },

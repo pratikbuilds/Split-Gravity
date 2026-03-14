@@ -1,6 +1,7 @@
 import { useAnimatedReaction, useFrameCallback, useSharedValue } from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
-import { OPPONENT_X_FACTOR, groundHeight } from './constants';
+import { FLAT_ZONE_LENGTH } from '../../types/game';
+import { PLAYER_X_FACTOR, groundHeight, SUPPORT_MIN_OVERLAP } from './constants';
 import { resolvePoseCode } from './multiplayerPose';
 import type { SimulationRefs } from './types';
 import type { OpponentSnapshot } from '../../types/game';
@@ -21,6 +22,76 @@ const lerp = (from: number, to: number, alpha: number) => {
   return from + (to - from) * alpha;
 };
 
+const GROUNDED_VELOCITY_THRESHOLD = 80;
+const SNAP_DISTANCE_PX = 24;
+
+/** Snap opponent Y to nearest platform surface when grounded, so they respect colliders. */
+const resolveOpponentSnapY = ({
+  worldX,
+  charW,
+  charH,
+  gravityDir,
+  rawTargetY,
+  velocityY,
+  pose,
+  rects,
+  groundY,
+  flatTopY,
+}: {
+  worldX: number;
+  charW: number;
+  charH: number;
+  gravityDir: 1 | -1;
+  rawTargetY: number;
+  velocityY: number;
+  pose: OpponentSnapshot['pose'];
+  rects: number[];
+  groundY: number;
+  flatTopY: number;
+}): number => {
+  'worklet';
+  const isLikelyGrounded =
+    pose === 'run' || pose === 'idle' || Math.abs(velocityY) < GROUNDED_VELOCITY_THRESHOLD;
+  if (!isLikelyGrounded) return rawTargetY;
+
+  const footLeft = worldX;
+  const footRight = worldX + charW;
+  const inFlatZone = worldX < FLAT_ZONE_LENGTH;
+
+  if (gravityDir === 1) {
+    if (inFlatZone) {
+      const groundSurfaceY = groundY - charH;
+      if (Math.abs(rawTargetY - groundSurfaceY) < SNAP_DISTANCE_PX) return groundSurfaceY;
+    }
+    for (let i = 0; i < rects.length; i += 4) {
+      const px = rects[i];
+      const py = rects[i + 1];
+      const pw = rects[i + 2];
+      const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
+      if (overlap >= SUPPORT_MIN_OVERLAP) {
+        const surfaceY = py - charH;
+        if (Math.abs(rawTargetY - surfaceY) < SNAP_DISTANCE_PX) return surfaceY;
+      }
+    }
+  } else {
+    if (inFlatZone) {
+      if (Math.abs(rawTargetY - flatTopY) < SNAP_DISTANCE_PX) return flatTopY;
+    }
+    for (let i = 0; i < rects.length; i += 4) {
+      const px = rects[i];
+      const py = rects[i + 1];
+      const pw = rects[i + 2];
+      const ph = rects[i + 3];
+      const overlap = Math.min(footRight, px + pw) - Math.max(footLeft, px);
+      if (overlap >= SUPPORT_MIN_OVERLAP) {
+        const surfaceY = py + ph;
+        if (Math.abs(rawTargetY - surfaceY) < SNAP_DISTANCE_PX) return surfaceY;
+      }
+    }
+  }
+  return rawTargetY;
+};
+
 type UseOpponentPlaybackArgs = {
   width: number;
   height: number;
@@ -28,6 +99,8 @@ type UseOpponentPlaybackArgs = {
   refs: Pick<
     SimulationRefs,
     | 'totalScroll'
+    | 'groundY'
+    | 'platformRects'
     | 'opponentPosY'
     | 'opponentPosX'
     | 'opponentGravity'
@@ -157,10 +230,32 @@ export const useOpponentPlayback = ({
       0,
       1
     );
-    const worldX = isFiniteNumber(sampledWorldX) ? sampledWorldX : refs.totalScroll.value;
+    const startAnchorX = width * PLAYER_X_FACTOR;
+    const isSyntheticBaseline =
+      current.seq === 0 &&
+      current.phase === 'running' &&
+      current.countdownLocked === 0;
+    const effectiveWorldX = isSyntheticBaseline
+      ? refs.totalScroll.value + startAnchorX
+      : isFiniteNumber(sampledWorldX)
+        ? sampledWorldX
+        : refs.totalScroll.value + startAnchorX;
+    const worldX = effectiveWorldX;
     const velocityX = isFiniteNumber(sampledVelocityX) ? sampledVelocityX : 0;
     const velocityY = isFiniteNumber(sampledVelocityY) ? sampledVelocityY : 0;
-    const targetY = groundHeight + normalizedY * laneSpan;
+    const rawTargetY = groundHeight + normalizedY * laneSpan;
+    const targetY = resolveOpponentSnapY({
+      worldX,
+      charW: charSize,
+      charH: charSize,
+      gravityDir: current.gravityDir,
+      rawTargetY,
+      velocityY,
+      pose: current.pose,
+      rects: refs.platformRects.value,
+      groundY: refs.groundY.value,
+      flatTopY: groundHeight,
+    });
     const screenX = worldX - refs.totalScroll.value;
 
     refs.opponentGravity.value = current.gravityDir;
@@ -174,10 +269,8 @@ export const useOpponentPlayback = ({
     refs.opponentPosY.value = isFiniteNumber(targetY) ? targetY : groundHeight;
     refs.opponentPosX.value =
       current.phase === 'running' && current.countdownLocked === 0
-        ? (isFiniteNumber(screenX) ? screenX : width * OPPONENT_X_FACTOR)
-        : worldX > 0
-          ? (isFiniteNumber(screenX) ? screenX : width * OPPONENT_X_FACTOR)
-          : width * OPPONENT_X_FACTOR;
+        ? (isFiniteNumber(screenX) ? screenX : startAnchorX)
+        : startAnchorX;
     refs.opponentAlive.value = current.alive ? 1 : 0;
   });
 };

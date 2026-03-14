@@ -23,6 +23,10 @@ export type MultiplayerViewState = {
   opponent: PlayerSession | null;
   matchStatus: MatchStatus;
   countdownStartAt: number | null;
+  /** Server time when countdown was sent; used for clock-skew-resistant remaining calculation */
+  countdownServerNow: number | null;
+  /** Client time when countdown was received */
+  countdownClientReceivedAt: number | null;
   reconnectSecondsRemaining: number | null;
   opponentSnapshot: OpponentSnapshot | null;
   multiplayerResult: MultiplayerResult | null;
@@ -59,6 +63,8 @@ const initialViewState: MultiplayerViewState = {
   opponent: null,
   matchStatus: 'idle',
   countdownStartAt: null,
+  countdownServerNow: null,
+  countdownClientReceivedAt: null,
   reconnectSecondsRemaining: null,
   opponentSnapshot: null,
   multiplayerResult: null,
@@ -368,6 +374,8 @@ export class MultiplayerMatchController {
         localPlayer: player,
         matchStatus: 'lobby',
         countdownStartAt: null,
+        countdownServerNow: null,
+        countdownClientReceivedAt: null,
         multiplayerResult: null,
         pendingAction: 'none',
         errorMessage: null,
@@ -386,10 +394,11 @@ export class MultiplayerMatchController {
       this.syncRoomState(room);
     });
 
-    this.socket.on('match:start', ({ startAt }) => {
+    this.socket.on('match:start', ({ startAt, serverNow }) => {
       this.clearCountdownTimer();
       this.resolvePendingRequest();
       this.resetOutgoingStateTracking();
+      const clientReceivedAt = Date.now();
       const initialOpponentSnapshot = this.buildBaselineOpponentSnapshot('countdown', {
         t: startAt,
         pose: 'idle',
@@ -397,12 +406,20 @@ export class MultiplayerMatchController {
       this.setState({
         matchStatus: 'countdown',
         countdownStartAt: startAt,
+        countdownServerNow: serverNow ?? null,
+        countdownClientReceivedAt: clientReceivedAt,
         opponentSnapshot: initialOpponentSnapshot,
         multiplayerResult: null,
         pendingAction: 'none',
       });
       this.emitOpponentSnapshot(initialOpponentSnapshot);
-      const delay = Math.max(0, startAt - Date.now());
+      const delay =
+        serverNow != null
+          ? Math.max(
+              0,
+              clientReceivedAt + (startAt - serverNow) - Date.now()
+            )
+          : Math.max(0, startAt - Date.now());
       this.countdownTimer = setTimeout(() => {
         this.countdownTimer = null;
         const runningSnapshot = this.promoteOpponentSnapshotToRunning(this.state.opponentSnapshot);
@@ -480,6 +497,8 @@ export class MultiplayerMatchController {
       this.setState({
         matchStatus: 'result',
         countdownStartAt: null,
+        countdownServerNow: null,
+        countdownClientReceivedAt: null,
         multiplayerResult: localizedResult,
         opponentSnapshot: null,
         reconnectSecondsRemaining: null,
@@ -573,6 +592,20 @@ export class MultiplayerMatchController {
       this.clearCountdownTimer();
     }
 
+    const countdownAnchor =
+      status === 'countdown' || status === 'running'
+        ? (() => {
+            const startAt = room.startedAt ?? this.state.countdownStartAt;
+            const serverNow = room.serverNow ?? this.state.countdownServerNow;
+            const clientReceivedAt = this.state.countdownClientReceivedAt;
+            if (startAt == null) return null;
+            if (serverNow != null && clientReceivedAt != null) {
+              return { startAt, serverNow, clientReceivedAt };
+            }
+            return { startAt, serverNow: null, clientReceivedAt: null };
+          })()
+        : null;
+
     let nextOpponentSnapshot: OpponentSnapshot | null = null;
     if (opponent) {
       if (status === 'lobby') {
@@ -612,6 +645,9 @@ export class MultiplayerMatchController {
         : this.state.connectionState
       : 'reconnecting';
 
+    const clientReceivedAt =
+      countdownAnchor && room.serverNow != null ? Date.now() : this.state.countdownClientReceivedAt;
+
     this.setState({
       roomCode: room.roomCode,
       roomKind: room.roomKind ?? 'casual',
@@ -620,10 +656,9 @@ export class MultiplayerMatchController {
       localPlayer,
       opponent,
       matchStatus: status,
-      countdownStartAt:
-        status === 'countdown' || status === 'running'
-          ? (room.startedAt ?? this.state.countdownStartAt)
-          : null,
+      countdownStartAt: countdownAnchor?.startAt ?? null,
+      countdownServerNow: countdownAnchor?.serverNow ?? null,
+      countdownClientReceivedAt: countdownAnchor ? (clientReceivedAt ?? Date.now()) : null,
       pendingAction: 'none',
       localReady: localPlayer ? room.readyPlayerIds.includes(localPlayer.playerId) : false,
       opponentReady: opponent ? room.readyPlayerIds.includes(opponent.playerId) : false,
@@ -718,6 +753,8 @@ export class MultiplayerMatchController {
       opponentReady: false,
       matchStatus: 'idle',
       countdownStartAt: null,
+      countdownServerNow: null,
+      countdownClientReceivedAt: null,
       multiplayerResult: null,
       reconnectSecondsRemaining: null,
       opponentSnapshot: null,
@@ -788,6 +825,8 @@ export class MultiplayerMatchController {
       opponentReady: false,
       matchStatus: 'idle',
       countdownStartAt: null,
+      countdownServerNow: null,
+      countdownClientReceivedAt: null,
       multiplayerResult: null,
       reconnectSecondsRemaining: null,
       opponentSnapshot: null,
@@ -849,6 +888,8 @@ export class MultiplayerMatchController {
       opponentReady: false,
       matchStatus: 'idle',
       countdownStartAt: null,
+      countdownServerNow: null,
+      countdownClientReceivedAt: null,
       multiplayerResult: null,
       reconnectSecondsRemaining: null,
       opponentSnapshot: null,

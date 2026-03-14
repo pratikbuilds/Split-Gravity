@@ -28,6 +28,8 @@ export interface RoomSnapshot {
   tokenId?: string | null;
   entryFeeTierId?: string | null;
   startedAt?: number | null;
+  /** Server time when snapshot was created; used for clock-skew-resistant countdown */
+  serverNow?: number;
   players: PlayerSession[];
   readyPlayerIds: string[];
   fundedPlayerIds?: string[];
@@ -175,6 +177,7 @@ export interface ServerToClientEvents {
     roomCode: string;
     seed: number;
     startAt: number;
+    serverNow: number;
     config: MatchConfig;
   }) => void;
   'match:opponentInput': (payload: OpponentInputPayload) => void;

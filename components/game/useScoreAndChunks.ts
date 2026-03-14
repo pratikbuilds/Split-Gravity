@@ -5,13 +5,10 @@ import { scheduleOnRN } from 'react-native-worklets';
 import type { Chunk, Platform } from '../../types/game';
 import { generateLevelChunks, preGenerateLevelChunks } from '../../utils/levelGeneratorSections';
 import {
-  CHAR_SCALE,
-  CHAR_SIZE,
   MULTIPLAYER_STATE_INTERVAL_MS,
-  PLAYER_X_FACTOR,
-  groundHeight,
   tileSize,
 } from './constants';
+import { resolveSpawnLayout } from './spawnLayout';
 import type { GravityDirection, SimulationRefs } from './types';
 
 interface UseScoreAndChunksArgs {
@@ -74,10 +71,14 @@ export const useScoreAndChunks = ({
     if (height <= 0 || width <= 0) return;
 
     const spawnGravity: GravityDirection = initialGravityDirection === -1 ? -1 : 1;
-    const charH = CHAR_SIZE * CHAR_SCALE;
+    const { spawnX, spawnY } = resolveSpawnLayout({
+      width,
+      stableGroundY: groundY,
+      gravityDirection: spawnGravity,
+    });
 
     refs.groundY.value = groundY;
-    refs.posY.value = spawnGravity === -1 ? groundHeight : groundY - charH;
+    refs.posY.value = spawnY;
     refs.velocityY.value = 0;
     refs.gravityDirection.value = spawnGravity;
     refs.flipLockedUntilLanding.value = 0;
@@ -92,7 +93,7 @@ export const useScoreAndChunks = ({
     refs.elapsedMs.value = 0;
     refs.frameIndex.value = 0;
     refs.lastMultiplayerStateAtMs.value = -MULTIPLAYER_STATE_INTERVAL_MS;
-    refs.charX.value = width * PLAYER_X_FACTOR;
+    refs.charX.value = spawnX;
     refs.initialized.value = 1;
     lastSpawnRef.current = 0;
     lastSpawnAt.value = 0;

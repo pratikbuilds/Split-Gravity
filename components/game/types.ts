@@ -31,6 +31,10 @@ export type GameCanvasProps = {
   opponentCustomSpriteAnimation?: GeneratedSpriteAnimationDescriptor | null;
   opponentInitialGravityDirection?: GravityDirection;
   multiplayerCountdownStartAt?: number | null;
+  /** For clock-skew-resistant countdown: server time when countdown was sent */
+  multiplayerCountdownServerNow?: number | null;
+  /** Client time when countdown was received */
+  multiplayerCountdownClientReceivedAt?: number | null;
   opponentSnapshotValue?: SharedValue<OpponentSnapshot | null>;
   opponentConnectionState?: 'connected' | 'reconnecting' | 'forfeit_pending';
   opponentName?: string;

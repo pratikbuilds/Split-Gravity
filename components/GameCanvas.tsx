@@ -28,6 +28,7 @@ import { useGameSimulation } from './game/useGameSimulation';
 import { OPPONENT_POSE_IDLE } from './game/multiplayerPose';
 import { useOpponentPlayback } from './game/useOpponentPlayback';
 import { useScoreAndChunks } from './game/useScoreAndChunks';
+import { resolveSpawnLayout } from './game/spawnLayout';
 import type { GameCanvasProps, GravityDirection, SimulationRefs } from './game/types';
 import { useWorldPictures } from './game/useWorldPictures';
 import { COUNTDOWN_DIGIT_ASSETS } from './game/worldAssetSources';
@@ -305,6 +306,8 @@ export const GameCanvas = ({
   opponentCustomSpriteAnimation,
   opponentInitialGravityDirection,
   multiplayerCountdownStartAt,
+  multiplayerCountdownServerNow,
+  multiplayerCountdownClientReceivedAt,
   opponentSnapshotValue,
   opponentConnectionState = 'connected',
   opponentName,
@@ -347,6 +350,8 @@ export const GameCanvas = ({
   const opponentCountdownLocked = useSharedValue(0);
   const assetsReady = useSharedValue(0);
   const multiplayerCountdownStartAtValue = useSharedValue(0);
+  const multiplayerCountdownServerNowValue = useSharedValue(0);
+  const multiplayerCountdownClientReceivedAtValue = useSharedValue(0);
 
   const refs = useMemo(
     () => ({
@@ -503,16 +508,29 @@ export const GameCanvas = ({
   }, [effectiveMultiplayerCountdownStartAt, multiplayerCountdownStartAtValue]);
 
   useEffect(() => {
+    multiplayerCountdownServerNowValue.value = multiplayerCountdownServerNow ?? 0;
+    multiplayerCountdownClientReceivedAtValue.value = multiplayerCountdownClientReceivedAt ?? 0;
+  }, [
+    multiplayerCountdownServerNow,
+    multiplayerCountdownClientReceivedAt,
+    multiplayerCountdownServerNowValue,
+    multiplayerCountdownClientReceivedAtValue,
+  ]);
+
+  useEffect(() => {
     void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
   }, []);
 
   useEffect(() => {
-    const charH = charSize;
     const opponentSpawnGravity =
       opponentInitialGravityDirection ?? (initialGravityDirection === 1 ? -1 : 1);
+    const { spawnX, spawnY } = resolveSpawnLayout({
+      width,
+      stableGroundY,
+      gravityDirection: opponentSpawnGravity,
+    });
     opponentGravity.value = opponentSpawnGravity;
-    const spawnY = opponentSpawnGravity === -1 ? groundHeight : stableGroundY - charH;
-    opponentPosX.value = 0;
+    opponentPosX.value = spawnX;
     opponentPosY.value = spawnY;
     opponentAlive.value = opponentCharacterId ? 1 : 0;
     opponentPoseCode.value = OPPONENT_POSE_IDLE;
@@ -538,6 +556,7 @@ export const GameCanvas = ({
     opponentVelocityX,
     restartKey,
     stableGroundY,
+    width,
   ]);
 
   useEffect(() => {
@@ -566,12 +585,23 @@ export const GameCanvas = ({
     };
 
     if (effectiveMultiplayerCountdownStartAt != null) {
-      const unlockDelay = Math.max(0, effectiveMultiplayerCountdownStartAt - Date.now());
+      const computeRemainingMs = (): number => {
+        const startAt = effectiveMultiplayerCountdownStartAt!;
+        const serverNow = multiplayerCountdownServerNow ?? 0;
+        const clientReceivedAt = multiplayerCountdownClientReceivedAt ?? 0;
+        if (serverNow > 0 && clientReceivedAt > 0) {
+          const serverTimeNow = serverNow + (Date.now() - clientReceivedAt);
+          return startAt - serverTimeNow;
+        }
+        return startAt - Date.now();
+      };
+      const remainingMs = computeRemainingMs();
+      const unlockDelay = Math.max(0, remainingMs);
       const syncCountdown = () => {
-        const remainingMs = effectiveMultiplayerCountdownStartAt - Date.now();
-        const digit = resolveCountdownDigit(remainingMs);
+        const remaining = computeRemainingMs();
+        const digit = resolveCountdownDigit(remaining);
         applyCountdownDigit(digit);
-        return remainingMs <= 0;
+        return remaining <= 0;
       };
 
       if (syncCountdown()) {
@@ -641,6 +671,8 @@ export const GameCanvas = ({
     refs.velocityX,
     restartKey,
     effectiveMultiplayerCountdownStartAt,
+    multiplayerCountdownServerNow,
+    multiplayerCountdownClientReceivedAt,
     triggerAudioEvent,
     worldAssetsReady,
   ]);
@@ -651,7 +683,13 @@ export const GameCanvas = ({
     if (startAt <= 0) return;
     if (assetsReady.value !== 1) return;
     if (countdownLocked.value === 0 && refs.initialized.value === 1) return;
-    if (Date.now() < startAt) return;
+    const serverNow = multiplayerCountdownServerNowValue.value;
+    const clientReceivedAt = multiplayerCountdownClientReceivedAtValue.value;
+    const countdownEnded =
+      serverNow > 0 && clientReceivedAt > 0
+        ? serverNow + (Date.now() - clientReceivedAt) >= startAt
+        : Date.now() >= startAt;
+    if (!countdownEnded) return;
     countdownLocked.value = 0;
     refs.initialized.value = 1;
   });
@@ -661,7 +699,14 @@ export const GameCanvas = ({
     if (!worldAssetsReady) return;
     if (countdownDigit !== null) return;
     if (effectiveMultiplayerCountdownStartAt != null) {
-      if (effectiveMultiplayerCountdownStartAt - Date.now() > 0) return;
+      const serverNow = multiplayerCountdownServerNow ?? 0;
+      const clientReceivedAt = multiplayerCountdownClientReceivedAt ?? 0;
+      const remainingMs =
+        serverNow > 0 && clientReceivedAt > 0
+          ? effectiveMultiplayerCountdownStartAt -
+            (serverNow + (Date.now() - clientReceivedAt))
+          : effectiveMultiplayerCountdownStartAt - Date.now();
+      if (remainingMs > 0) return;
     }
     countdownLocked.value = 0;
     refs.initialized.value = 1;
@@ -669,6 +714,8 @@ export const GameCanvas = ({
     worldAssetsReady,
     countdownDigit,
     effectiveMultiplayerCountdownStartAt,
+    multiplayerCountdownServerNow,
+    multiplayerCountdownClientReceivedAt,
     countdownLocked,
     refs.initialized,
   ]);
